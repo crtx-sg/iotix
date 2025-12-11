@@ -1,0 +1,132 @@
+{
+  "id": "smart-actuator-v1",
+  "name": "Smart Actuator",
+  "description": "Actuator device that receives commands and reports state changes",
+  "version": "1.0.0",
+  "type": "actuator",
+  "protocol": "mqtt",
+  "connection": {
+    "broker": "mqtt-broker",
+    "port": 1883,
+    "clientIdPattern": "actuator-${deviceId}",
+    "topicPattern": "actuators/${deviceId}/state",
+    "qos": 2,
+    "keepAlive": 60
+  },
+  "telemetry": [
+    {
+      "name": "powerState",
+      "type": "boolean",
+      "generator": {
+        "type": "constant",
+        "value": false
+      },
+      "intervalMs": 10000
+    },
+    {
+      "name": "targetValue",
+      "type": "integer",
+      "generator": {
+        "type": "constant",
+        "value": 0
+      },
+      "intervalMs": 10000
+    },
+    {
+      "name": "currentValue",
+      "type": "integer",
+      "generator": {
+        "type": "constant",
+        "value": 0
+      },
+      "intervalMs": 1000
+    }
+  ],
+  "commands": [
+    {
+      "name": "setPower",
+      "topic": "actuators/${deviceId}/commands/setPower",
+      "parameters": [
+        {
+          "name": "state",
+          "type": "boolean",
+          "required": true
+        }
+      ],
+      "response": {
+        "topic": "actuators/${deviceId}/commands/setPower/response",
+        "template": {
+          "success": true,
+          "newState": "${state}"
+        }
+      }
+    },
+    {
+      "name": "setTarget",
+      "topic": "actuators/${deviceId}/commands/setTarget",
+      "parameters": [
+        {
+          "name": "value",
+          "type": "integer",
+          "required": true
+        }
+      ],
+      "response": {
+        "topic": "actuators/${deviceId}/commands/setTarget/response",
+        "template": {
+          "success": true,
+          "targetValue": "${value}"
+        }
+      }
+    }
+  ],
+  "behaviors": [
+    {
+      "name": "onPowerOn",
+      "trigger": {
+        "type": "event",
+        "event": "command:setPower:state=true"
+      },
+      "action": {
+        "type": "setState",
+        "state": {
+          "powerState": true
+        }
+      }
+    },
+    {
+      "name": "onPowerOff",
+      "trigger": {
+        "type": "event",
+        "event": "command:setPower:state=false"
+      },
+      "action": {
+        "type": "setState",
+        "state": {
+          "powerState": false,
+          "targetValue": 0,
+          "currentValue": 0
+        }
+      }
+    },
+    {
+      "name": "startup",
+      "trigger": {
+        "type": "startup"
+      },
+      "action": {
+        "type": "publish",
+        "topic": "actuators/${deviceId}/events",
+        "payload": {
+          "event": "startup",
+          "timestamp": "${timestamp}"
+        }
+      }
+    }
+  ],
+  "metadata": {
+    "manufacturer": "IoTix Demo",
+    "model": "ACT-500",
+    "firmwareVersion": "1.2.0"
+  }
+}

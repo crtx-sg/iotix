@@ -1,0 +1,212 @@
+# Default values for iotix
+
+# Global settings
+global:
+  imageRegistry: ""
+  imagePullSecrets: []
+
+# Device Engine configuration
+deviceEngine:
+  enabled: true
+  replicaCount: 1
+  image:
+    repository: iotix/device-engine
+    tag: "0.1.0"
+    pullPolicy: IfNotPresent
+  resources:
+    limits:
+      cpu: "2"
+      memory: 4Gi
+    requests:
+      cpu: "500m"
+      memory: 1Gi
+  autoscaling:
+    enabled: false
+    minReplicas: 1
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 70
+    targetMemoryUtilizationPercentage: 80
+  service:
+    type: ClusterIP
+    port: 8080
+  config:
+    logLevel: INFO
+    maxDevicesPerInstance: 10000
+  deviceModels:
+    # Mount device models from ConfigMap
+    enabled: true
+    configMapName: ""
+
+# Test Engine configuration
+testEngine:
+  enabled: true
+  replicaCount: 1
+  image:
+    repository: iotix/test-engine
+    tag: "0.1.0"
+    pullPolicy: IfNotPresent
+  resources:
+    limits:
+      cpu: "1"
+      memory: 2Gi
+    requests:
+      cpu: "250m"
+      memory: 512Mi
+  service:
+    type: ClusterIP
+    port: 8081
+
+# MQTT Broker configuration
+mqtt:
+  enabled: true
+  broker: vernemq  # vernemq or emqx
+  vernemq:
+    replicaCount: 1
+    image:
+      repository: vernemq/vernemq
+      tag: "1.13.0"
+    resources:
+      limits:
+        cpu: "2"
+        memory: 4Gi
+      requests:
+        cpu: "500m"
+        memory: 1Gi
+    service:
+      type: ClusterIP
+      port: 1883
+      websocketPort: 9001
+    persistence:
+      enabled: true
+      size: 10Gi
+    config:
+      allowAnonymous: true
+      maxClientIdSize: 128
+      maxConnections: 100000
+  emqx:
+    replicaCount: 1
+    image:
+      repository: emqx/emqx
+      tag: "5.3.0"
+    resources:
+      limits:
+        cpu: "2"
+        memory: 4Gi
+      requests:
+        cpu: "500m"
+        memory: 1Gi
+    service:
+      type: ClusterIP
+      port: 1883
+      websocketPort: 8083
+      dashboardPort: 18083
+
+# Kafka configuration (uses Bitnami chart)
+kafka:
+  enabled: true
+  replicaCount: 1
+  persistence:
+    enabled: true
+    size: 20Gi
+  kraft:
+    enabled: true
+  listeners:
+    client:
+      protocol: PLAINTEXT
+  extraConfig: |
+    auto.create.topics.enable=true
+    default.replication.factor=1
+    num.partitions=12
+
+# InfluxDB configuration
+influxdb:
+  enabled: true
+  image:
+    repository: influxdb
+    tag: "2.7"
+  persistence:
+    enabled: true
+    size: 50Gi
+  auth:
+    admin:
+      username: admin
+      password: ""  # Set via secret
+      token: ""     # Set via secret
+      org: iotix
+      bucket: telemetry
+  retention:
+    default: 30d
+
+# Grafana configuration (uses Grafana chart)
+grafana:
+  enabled: true
+  adminPassword: ""  # Set via secret
+  persistence:
+    enabled: true
+    size: 5Gi
+  datasources:
+    datasources.yaml:
+      apiVersion: 1
+      datasources:
+        - name: InfluxDB
+          type: influxdb
+          access: proxy
+          url: http://{{ .Release.Name }}-influxdb:8086
+          jsonData:
+            version: Flux
+            organization: iotix
+            defaultBucket: telemetry
+          secureJsonData:
+            token: $INFLUXDB_TOKEN
+  dashboardProviders:
+    dashboardproviders.yaml:
+      apiVersion: 1
+      providers:
+        - name: 'default'
+          orgId: 1
+          folder: ''
+          type: file
+          disableDeletion: false
+          editable: true
+          options:
+            path: /var/lib/grafana/dashboards/default
+
+# Chaos Mesh configuration (for network simulation)
+chaosMesh:
+  enabled: false
+  # Install via: helm install chaos-mesh chaos-mesh/chaos-mesh -n chaos-testing
+
+# Ingress configuration
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: iotix.local
+      paths:
+        - path: /api
+          pathType: Prefix
+          service: device-engine
+        - path: /grafana
+          pathType: Prefix
+          service: grafana
+  tls: []
+
+# Service Account
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+# Pod Security
+podSecurityContext:
+  fsGroup: 1000
+
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+
+# Node selection
+nodeSelector: {}
+tolerations: []
+affinity: {}

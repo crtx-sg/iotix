@@ -1,0 +1,34 @@
+{{- if .Values.mqtt.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "iotix.mqtt.fullname" . }}
+  labels:
+    {{- include "iotix.labels" . | nindent 4 }}
+    app.kubernetes.io/component: mqtt
+spec:
+  type: ClusterIP
+  ports:
+    - port: 1883
+      targetPort: mqtt
+      protocol: TCP
+      name: mqtt
+    {{- if eq .Values.mqtt.broker "vernemq" }}
+    - port: {{ .Values.mqtt.vernemq.service.websocketPort }}
+      targetPort: websocket
+      protocol: TCP
+      name: websocket
+    {{- else if eq .Values.mqtt.broker "emqx" }}
+    - port: {{ .Values.mqtt.emqx.service.websocketPort }}
+      targetPort: websocket
+      protocol: TCP
+      name: websocket
+    - port: {{ .Values.mqtt.emqx.service.dashboardPort }}
+      targetPort: dashboard
+      protocol: TCP
+      name: dashboard
+    {{- end }}
+  selector:
+    {{- include "iotix.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: mqtt
+{{- end }}

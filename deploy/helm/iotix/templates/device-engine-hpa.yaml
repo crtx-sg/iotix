@@ -1,0 +1,33 @@
+{{- if and .Values.deviceEngine.enabled .Values.deviceEngine.autoscaling.enabled }}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "iotix.deviceEngine.fullname" . }}
+  labels:
+    {{- include "iotix.labels" . | nindent 4 }}
+    app.kubernetes.io/component: device-engine
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "iotix.deviceEngine.fullname" . }}
+  minReplicas: {{ .Values.deviceEngine.autoscaling.minReplicas }}
+  maxReplicas: {{ .Values.deviceEngine.autoscaling.maxReplicas }}
+  metrics:
+    {{- if .Values.deviceEngine.autoscaling.targetCPUUtilizationPercentage }}
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.deviceEngine.autoscaling.targetCPUUtilizationPercentage }}
+    {{- end }}
+    {{- if .Values.deviceEngine.autoscaling.targetMemoryUtilizationPercentage }}
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.deviceEngine.autoscaling.targetMemoryUtilizationPercentage }}
+    {{- end }}
+{{- end }}

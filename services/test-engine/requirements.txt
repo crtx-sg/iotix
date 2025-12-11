@@ -1,0 +1,26 @@
+# Core dependencies
+fastapi>=0.104.0
+uvicorn>=0.24.0
+pydantic>=2.5.0
+pydantic-settings>=2.1.0
+
+# HTTP client
+httpx>=0.25.0
+aiohttp>=3.9.0
+
+# Test frameworks
+robotframework>=6.1.0
+locust>=2.20.0
+locust-plugins>=4.0.0
+
+# Metrics
+influxdb-client>=1.38.0
+
+# Utilities
+python-json-logger>=2.0.7
+structlog>=23.2.0
+croniter>=2.0.1
+
+# Report generation
+jinja2>=3.1.0
+weasyprint>=60.0  # For PDF generation

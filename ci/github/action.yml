@@ -1,0 +1,153 @@
+name: 'IoTix Device Simulation'
+description: 'Run IoT device simulation tests using IoTix platform'
+author: 'IoTix Contributors'
+
+branding:
+  icon: 'cpu'
+  color: 'blue'
+
+inputs:
+  device-engine-url:
+    description: 'URL of the IoTix Device Engine API'
+    required: false
+    default: 'http://localhost:8080'
+
+  device-model:
+    description: 'Path to device model JSON file'
+    required: true
+
+  device-count:
+    description: 'Number of devices to simulate'
+    required: false
+    default: '10'
+
+  duration:
+    description: 'Duration of simulation in seconds'
+    required: false
+    default: '60'
+
+  test-suite:
+    description: 'Path to Robot Framework test suite'
+    required: false
+
+  locust-file:
+    description: 'Path to Locust test file'
+    required: false
+
+  locust-users:
+    description: 'Number of Locust users'
+    required: false
+    default: '10'
+
+  output-dir:
+    description: 'Directory for test results'
+    required: false
+    default: './iotix-results'
+
+outputs:
+  devices-created:
+    description: 'Number of devices created'
+    value: ${{ steps.run-simulation.outputs.devices-created }}
+
+  messages-sent:
+    description: 'Total telemetry messages sent'
+    value: ${{ steps.run-simulation.outputs.messages-sent }}
+
+  test-passed:
+    description: 'Whether all tests passed'
+    value: ${{ steps.run-tests.outputs.passed }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Setup Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install IoTix CLI
+      shell: bash
+      run: |
+        pip install httpx robotframework
+        if [ -n "${{ inputs.locust-file }}" ]; then
+          pip install locust locust-plugins
+        fi
+
+    - name: Register Device Model
+      id: register-model
+      shell: bash
+      run: |
+        MODEL_RESPONSE=$(curl -s -X POST "${{ inputs.device-engine-url }}/api/v1/models" \
+          -H "Content-Type: application/json" \
+          -d @"${{ inputs.device-model }}")
+        MODEL_ID=$(echo $MODEL_RESPONSE | python -c "import sys, json; print(json.load(sys.stdin).get('id', ''))")
+        echo "model-id=$MODEL_ID" >> $GITHUB_OUTPUT
+
+    - name: Create Device Group
+      id: create-group
+      shell: bash
+      run: |
+        GROUP_RESPONSE=$(curl -s -X POST "${{ inputs.device-engine-url }}/api/v1/groups" \
+          -H "Content-Type: application/json" \
+          -d "{\"modelId\": \"${{ steps.register-model.outputs.model-id }}\", \"count\": ${{ inputs.device-count }}}")
+        GROUP_ID=$(echo $GROUP_RESPONSE | python -c "import sys, json; print(json.load(sys.stdin).get('groupId', ''))")
+        echo "group-id=$GROUP_ID" >> $GITHUB_OUTPUT
+
+    - name: Start Device Group
+      shell: bash
+      run: |
+        curl -s -X POST "${{ inputs.device-engine-url }}/api/v1/groups/${{ steps.create-group.outputs.group-id }}/start"
+
+    - name: Run Simulation
+      id: run-simulation
+      shell: bash
+      run: |
+        echo "Running simulation for ${{ inputs.duration }} seconds..."
+        sleep ${{ inputs.duration }}
+
+        STATS=$(curl -s "${{ inputs.device-engine-url }}/api/v1/stats")
+        DEVICES=$(echo $STATS | python -c "import sys, json; print(json.load(sys.stdin).get('activeDevices', 0))")
+        MESSAGES=$(echo $STATS | python -c "import sys, json; print(json.load(sys.stdin).get('totalMessagesSent', 0))")
+
+        echo "devices-created=$DEVICES" >> $GITHUB_OUTPUT
+        echo "messages-sent=$MESSAGES" >> $GITHUB_OUTPUT
+
+    - name: Run Robot Framework Tests
+      if: inputs.test-suite != ''
+      shell: bash
+      run: |
+        robot --outputdir ${{ inputs.output-dir }} \
+          --variable DEVICE_ENGINE_URL:${{ inputs.device-engine-url }} \
+          ${{ inputs.test-suite }}
+
+    - name: Run Locust Load Test
+      if: inputs.locust-file != ''
+      shell: bash
+      run: |
+        locust -f ${{ inputs.locust-file }} \
+          --host ${{ inputs.device-engine-url }} \
+          --users ${{ inputs.locust-users }} \
+          --run-time ${{ inputs.duration }}s \
+          --headless \
+          --csv ${{ inputs.output-dir }}/locust
+
+    - name: Check Test Results
+      id: run-tests
+      shell: bash
+      run: |
+        if [ -f "${{ inputs.output-dir }}/output.xml" ]; then
+          FAILED=$(python -c "import xml.etree.ElementTree as ET; t=ET.parse('${{ inputs.output-dir }}/output.xml'); print(t.find('.//stat[@name=\"All Tests\"]').get('fail', '0'))")
+          if [ "$FAILED" = "0" ]; then
+            echo "passed=true" >> $GITHUB_OUTPUT
+          else
+            echo "passed=false" >> $GITHUB_OUTPUT
+          fi
+        else
+          echo "passed=true" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Cleanup
+      if: always()
+      shell: bash
+      run: |
+        curl -s -X DELETE "${{ inputs.device-engine-url }}/api/v1/groups/${{ steps.create-group.outputs.group-id }}" || true

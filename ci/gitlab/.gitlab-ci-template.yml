@@ -1,0 +1,96 @@
+# IoTix GitLab CI Template
+# Include this template in your .gitlab-ci.yml:
+#   include:
+#     - project: 'iotix/iotix'
+#       file: '/ci/gitlab/.gitlab-ci-template.yml'
+
+variables:
+  IOTIX_DEVICE_ENGINE_URL: ${DEVICE_ENGINE_URL:-http://localhost:8080}
+  IOTIX_DEVICE_COUNT: ${DEVICE_COUNT:-10}
+  IOTIX_SIMULATION_DURATION: ${SIMULATION_DURATION:-60}
+
+.iotix-base:
+  image: python:3.11-slim
+  before_script:
+    - pip install httpx robotframework paho-mqtt
+
+.iotix-simulation:
+  extends: .iotix-base
+  script:
+    - |
+      # Register device model
+      MODEL_ID=$(curl -s -X POST "${IOTIX_DEVICE_ENGINE_URL}/api/v1/models" \
+        -H "Content-Type: application/json" \
+        -d @"${DEVICE_MODEL_FILE}" | python -c "import sys,json; print(json.load(sys.stdin).get('id',''))")
+      echo "Registered model: $MODEL_ID"
+
+      # Create device group
+      GROUP_ID=$(curl -s -X POST "${IOTIX_DEVICE_ENGINE_URL}/api/v1/groups" \
+        -H "Content-Type: application/json" \
+        -d "{\"modelId\": \"$MODEL_ID\", \"count\": ${IOTIX_DEVICE_COUNT}}" | python -c "import sys,json; print(json.load(sys.stdin).get('groupId',''))")
+      echo "Created group: $GROUP_ID"
+
+      # Start devices
+      curl -s -X POST "${IOTIX_DEVICE_ENGINE_URL}/api/v1/groups/${GROUP_ID}/start"
+      echo "Started ${IOTIX_DEVICE_COUNT} devices"
+
+      # Run simulation
+      sleep ${IOTIX_SIMULATION_DURATION}
+
+      # Get stats
+      curl -s "${IOTIX_DEVICE_ENGINE_URL}/api/v1/stats" | python -m json.tool
+
+      # Cleanup
+      curl -s -X DELETE "${IOTIX_DEVICE_ENGINE_URL}/api/v1/groups/${GROUP_ID}"
+
+.iotix-robot-tests:
+  extends: .iotix-base
+  script:
+    - pip install robotframework-iotix
+    - robot --outputdir results --variable DEVICE_ENGINE_URL:${IOTIX_DEVICE_ENGINE_URL} ${ROBOT_TEST_SUITE}
+  artifacts:
+    when: always
+    paths:
+      - results/
+    reports:
+      junit: results/output.xml
+
+.iotix-locust-load-test:
+  extends: .iotix-base
+  script:
+    - pip install locust locust-plugins
+    - |
+      locust -f ${LOCUST_FILE} \
+        --host ${IOTIX_DEVICE_ENGINE_URL} \
+        --users ${LOCUST_USERS:-10} \
+        --spawn-rate ${LOCUST_SPAWN_RATE:-1} \
+        --run-time ${IOTIX_SIMULATION_DURATION}s \
+        --headless \
+        --csv results/locust \
+        --html results/locust-report.html
+  artifacts:
+    when: always
+    paths:
+      - results/
+
+# Example usage in your .gitlab-ci.yml:
+#
+# stages:
+#   - test
+#   - load-test
+#
+# iot-simulation-test:
+#   extends: .iotix-robot-tests
+#   stage: test
+#   variables:
+#     ROBOT_TEST_SUITE: tests/device_tests.robot
+#   services:
+#     - name: iotix/device-engine:latest
+#       alias: device-engine
+#
+# iot-load-test:
+#   extends: .iotix-locust-load-test
+#   stage: load-test
+#   variables:
+#     LOCUST_FILE: tests/locust/load_test.py
+#     LOCUST_USERS: 100

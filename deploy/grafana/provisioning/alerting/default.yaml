@@ -1,0 +1,328 @@
+apiVersion: 1
+
+# Contact points for notifications
+contactPoints:
+  - orgId: 1
+    name: 'iotix-notifications'
+    receivers:
+      - uid: 'slack-iotix'
+        type: 'slack'
+        settings:
+          recipient: '#iotix-alerts'
+          token: '${SLACK_TOKEN}'
+          username: 'IoTix Alerting'
+        disableResolveMessage: false
+      - uid: 'email-iotix'
+        type: 'email'
+        settings:
+          addresses: '${ALERT_EMAIL}'
+          singleEmail: false
+        disableResolveMessage: false
+
+# Notification policies
+policies:
+  - orgId: 1
+    receiver: 'iotix-notifications'
+    group_by: ['alertname', 'grafana_folder']
+    group_wait: '30s'
+    group_interval: '5m'
+    repeat_interval: '4h'
+    routes:
+      - receiver: 'iotix-notifications'
+        matchers:
+          - severity = critical
+        group_wait: '10s'
+        continue: false
+      - receiver: 'iotix-notifications'
+        matchers:
+          - severity = warning
+        group_wait: '1m'
+        continue: false
+
+# Alert rules
+groups:
+  - orgId: 1
+    name: 'iotix-device-alerts'
+    folder: 'IoTix'
+    interval: '1m'
+    rules:
+      - uid: 'device-count-low'
+        title: 'Low Active Device Count'
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: influxdb
+            model:
+              query: |
+                from(bucket: "telemetry")
+                  |> range(start: -5m)
+                  |> filter(fn: (r) => r._measurement == "engine_stats" and r._field == "active_devices")
+                  |> last()
+          - refId: B
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: '__expr__'
+            model:
+              conditions:
+                - evaluator:
+                    params: [10]
+                    type: lt
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    type: last
+              type: classic_conditions
+          - refId: C
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: '__expr__'
+            model:
+              conditions:
+                - evaluator:
+                    params: [0, 0]
+                    type: gt
+                  query:
+                    params: [B]
+              type: threshold
+        for: '5m'
+        labels:
+          severity: warning
+          component: device-engine
+        annotations:
+          summary: 'Active device count is below threshold'
+          description: 'The number of active devices has dropped below 10 for more than 5 minutes.'
+
+      - uid: 'no-telemetry'
+        title: 'No Telemetry Received'
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: influxdb
+            model:
+              query: |
+                from(bucket: "telemetry")
+                  |> range(start: -10m)
+                  |> filter(fn: (r) => r._measurement == "telemetry")
+                  |> count()
+          - refId: B
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: '__expr__'
+            model:
+              conditions:
+                - evaluator:
+                    params: [1]
+                    type: lt
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    type: last
+              type: classic_conditions
+          - refId: C
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: '__expr__'
+            model:
+              conditions:
+                - evaluator:
+                    params: [0, 0]
+                    type: gt
+                  query:
+                    params: [B]
+              type: threshold
+        for: '10m'
+        labels:
+          severity: critical
+          component: device-engine
+        annotations:
+          summary: 'No telemetry data received'
+          description: 'No telemetry data has been received for more than 10 minutes.'
+
+  - orgId: 1
+    name: 'iotix-test-alerts'
+    folder: 'IoTix'
+    interval: '1m'
+    rules:
+      - uid: 'test-failure-rate'
+        title: 'High Test Failure Rate'
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 3600
+              to: 0
+            datasourceUid: influxdb
+            model:
+              query: |
+                passed = from(bucket: "telemetry")
+                  |> range(start: -1h)
+                  |> filter(fn: (r) => r._measurement == "test_runs" and r._field == "passed")
+                  |> sum()
+                failed = from(bucket: "telemetry")
+                  |> range(start: -1h)
+                  |> filter(fn: (r) => r._measurement == "test_runs" and r._field == "failed")
+                  |> sum()
+                join(tables: {passed: passed, failed: failed}, on: ["_time"])
+                  |> map(fn: (r) => ({_value: float(v: r._value_failed) / (float(v: r._value_passed) + float(v: r._value_failed)) * 100.0}))
+          - refId: B
+            relativeTimeRange:
+              from: 3600
+              to: 0
+            datasourceUid: '__expr__'
+            model:
+              conditions:
+                - evaluator:
+                    params: [20]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    type: last
+              type: classic_conditions
+          - refId: C
+            relativeTimeRange:
+              from: 3600
+              to: 0
+            datasourceUid: '__expr__'
+            model:
+              conditions:
+                - evaluator:
+                    params: [0, 0]
+                    type: gt
+                  query:
+                    params: [B]
+              type: threshold
+        for: '5m'
+        labels:
+          severity: critical
+          component: test-engine
+        annotations:
+          summary: 'High test failure rate detected'
+          description: 'More than 20% of tests are failing in the last hour.'
+
+  - orgId: 1
+    name: 'iotix-system-alerts'
+    folder: 'IoTix'
+    interval: '30s'
+    rules:
+      - uid: 'high-cpu'
+        title: 'High CPU Usage'
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: influxdb
+            model:
+              query: |
+                from(bucket: "telemetry")
+                  |> range(start: -5m)
+                  |> filter(fn: (r) => r._measurement == "system_metrics" and r._field == "cpu_percent")
+                  |> mean()
+          - refId: B
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: '__expr__'
+            model:
+              conditions:
+                - evaluator:
+                    params: [80]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    type: last
+              type: classic_conditions
+          - refId: C
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: '__expr__'
+            model:
+              conditions:
+                - evaluator:
+                    params: [0, 0]
+                    type: gt
+                  query:
+                    params: [B]
+              type: threshold
+        for: '5m'
+        labels:
+          severity: warning
+          component: system
+        annotations:
+          summary: 'High CPU usage detected'
+          description: 'CPU usage has been above 80% for more than 5 minutes.'
+
+      - uid: 'high-memory'
+        title: 'High Memory Usage'
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: influxdb
+            model:
+              query: |
+                from(bucket: "telemetry")
+                  |> range(start: -5m)
+                  |> filter(fn: (r) => r._measurement == "system_metrics" and r._field == "memory_percent")
+                  |> mean()
+          - refId: B
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: '__expr__'
+            model:
+              conditions:
+                - evaluator:
+                    params: [90]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    type: last
+              type: classic_conditions
+          - refId: C
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: '__expr__'
+            model:
+              conditions:
+                - evaluator:
+                    params: [0, 0]
+                    type: gt
+                  query:
+                    params: [B]
+              type: threshold
+        for: '5m'
+        labels:
+          severity: critical
+          component: system
+        annotations:
+          summary: 'High memory usage detected'
+          description: 'Memory usage has been above 90% for more than 5 minutes.'

@@ -1,0 +1,45 @@
+# Chaos Mesh NetworkChaos Template: Poor Cellular Connection
+# Simulates a poor cellular/mobile network connection
+# Latency: 200ms, Packet Loss: 5%, Bandwidth: 500kbps
+apiVersion: chaos-mesh.org/v1alpha1
+kind: NetworkChaos
+metadata:
+  name: poor-cellular
+  namespace: {{ .Release.Namespace }}
+  labels:
+    iotix.io/template: poor-cellular
+    iotix.io/category: network-simulation
+spec:
+  action: delay
+  mode: all
+  selector:
+    namespaces:
+      - {{ .Release.Namespace }}
+    labelSelectors:
+      app.kubernetes.io/component: device-engine
+  delay:
+    latency: "200ms"
+    jitter: "50ms"
+    correlation: "25"
+  duration: "{{ .Values.duration | default "5m" }}"
+---
+apiVersion: chaos-mesh.org/v1alpha1
+kind: NetworkChaos
+metadata:
+  name: poor-cellular-loss
+  namespace: {{ .Release.Namespace }}
+  labels:
+    iotix.io/template: poor-cellular
+    iotix.io/category: network-simulation
+spec:
+  action: loss
+  mode: all
+  selector:
+    namespaces:
+      - {{ .Release.Namespace }}
+    labelSelectors:
+      app.kubernetes.io/component: device-engine
+  loss:
+    loss: "5"
+    correlation: "25"
+  duration: "{{ .Values.duration | default "5m" }}"

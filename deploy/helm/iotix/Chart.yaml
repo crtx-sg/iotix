@@ -1,0 +1,31 @@
+apiVersion: v2
+name: iotix
+description: IoT Device Simulation Platform - Virtual device testing at scale
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - iot
+  - simulation
+  - testing
+  - mqtt
+  - device-virtualization
+home: https://github.com/iotix/iotix
+sources:
+  - https://github.com/iotix/iotix
+maintainers:
+  - name: IoTix Team
+    email: team@iotix.io
+dependencies:
+  - name: kafka
+    version: "26.x.x"
+    repository: https://charts.bitnami.com/bitnami
+    condition: kafka.enabled
+  - name: influxdb2
+    version: "2.x.x"
+    repository: https://helm.influxdata.com
+    condition: influxdb.enabled
+  - name: grafana
+    version: "7.x.x"
+    repository: https://grafana.github.io/helm-charts
+    condition: grafana.enabled

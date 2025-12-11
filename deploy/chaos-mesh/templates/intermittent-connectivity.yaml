@@ -1,0 +1,30 @@
+# Chaos Mesh NetworkChaos Template: Intermittent Connectivity
+# Simulates devices going in and out of network coverage
+# 30-second partitions every 5 minutes
+apiVersion: chaos-mesh.org/v1alpha1
+kind: NetworkChaos
+metadata:
+  name: intermittent-connectivity
+  namespace: {{ .Release.Namespace }}
+  labels:
+    iotix.io/template: intermittent-connectivity
+    iotix.io/category: network-simulation
+spec:
+  action: partition
+  mode: all
+  selector:
+    namespaces:
+      - {{ .Release.Namespace }}
+    labelSelectors:
+      app.kubernetes.io/component: device-engine
+  direction: both
+  target:
+    selector:
+      namespaces:
+        - {{ .Release.Namespace }}
+      labelSelectors:
+        app.kubernetes.io/component: mqtt
+    mode: all
+  duration: "30s"
+  scheduler:
+    cron: "*/5 * * * *"

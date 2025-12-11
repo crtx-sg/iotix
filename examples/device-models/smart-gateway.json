@@ -1,0 +1,132 @@
+{
+  "id": "smart-gateway-v1",
+  "name": "Smart Gateway",
+  "description": "Gateway device that aggregates data from child sensors",
+  "version": "1.0.0",
+  "type": "gateway",
+  "protocol": "mqtt",
+  "connection": {
+    "broker": "mqtt-broker",
+    "port": 1883,
+    "clientIdPattern": "gateway-${deviceId}",
+    "topicPattern": "gateways/${deviceId}/telemetry",
+    "qos": 2,
+    "keepAlive": 30
+  },
+  "telemetry": [
+    {
+      "name": "connectedDevices",
+      "type": "integer",
+      "generator": {
+        "type": "random",
+        "min": 5,
+        "max": 25,
+        "distribution": "uniform"
+      },
+      "intervalMs": 10000
+    },
+    {
+      "name": "cpuUsage",
+      "type": "number",
+      "unit": "percent",
+      "generator": {
+        "type": "random",
+        "min": 10,
+        "max": 80,
+        "distribution": "normal",
+        "mean": 35,
+        "stddev": 15
+      },
+      "intervalMs": 5000
+    },
+    {
+      "name": "memoryUsage",
+      "type": "number",
+      "unit": "percent",
+      "generator": {
+        "type": "random",
+        "min": 20,
+        "max": 90,
+        "distribution": "uniform"
+      },
+      "intervalMs": 5000
+    },
+    {
+      "name": "uptime",
+      "type": "integer",
+      "unit": "seconds",
+      "generator": {
+        "type": "sequence",
+        "start": 0,
+        "step": 5
+      },
+      "intervalMs": 5000
+    }
+  ],
+  "commands": [
+    {
+      "name": "reboot",
+      "topic": "gateways/${deviceId}/commands/reboot",
+      "response": {
+        "topic": "gateways/${deviceId}/commands/reboot/response",
+        "template": {
+          "status": "rebooting",
+          "timestamp": "${timestamp}"
+        }
+      }
+    },
+    {
+      "name": "updateFirmware",
+      "topic": "gateways/${deviceId}/commands/updateFirmware",
+      "parameters": [
+        {
+          "name": "version",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "url",
+          "type": "string",
+          "required": true
+        }
+      ]
+    }
+  ],
+  "behaviors": [
+    {
+      "name": "highCpuAlert",
+      "trigger": {
+        "type": "condition",
+        "condition": "cpuUsage > 70"
+      },
+      "action": {
+        "type": "publish",
+        "topic": "gateways/${deviceId}/alerts",
+        "payload": {
+          "type": "highCpu",
+          "value": "${cpuUsage}"
+        }
+      }
+    },
+    {
+      "name": "heartbeat",
+      "trigger": {
+        "type": "schedule",
+        "schedule": "*/30 * * * * *"
+      },
+      "action": {
+        "type": "publish",
+        "topic": "gateways/${deviceId}/heartbeat",
+        "payload": {
+          "timestamp": "${timestamp}",
+          "status": "alive"
+        }
+      }
+    }
+  ],
+  "metadata": {
+    "manufacturer": "IoTix Demo",
+    "model": "GW-1000",
+    "firmwareVersion": "2.1.0"
+  }
+}

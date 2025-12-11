@@ -1,0 +1,92 @@
+{
+  "id": "temperature-sensor-v1",
+  "name": "Temperature Sensor",
+  "description": "Basic temperature sensor with humidity readings",
+  "version": "1.0.0",
+  "type": "sensor",
+  "protocol": "mqtt",
+  "connection": {
+    "broker": "mqtt-broker",
+    "port": 1883,
+    "clientIdPattern": "temp-sensor-${deviceId}",
+    "topicPattern": "devices/${deviceId}/telemetry",
+    "qos": 1,
+    "keepAlive": 60
+  },
+  "telemetry": [
+    {
+      "name": "temperature",
+      "type": "number",
+      "unit": "celsius",
+      "generator": {
+        "type": "random",
+        "min": 18.0,
+        "max": 28.0,
+        "distribution": "normal",
+        "mean": 22.0,
+        "stddev": 2.0
+      },
+      "intervalMs": 5000
+    },
+    {
+      "name": "humidity",
+      "type": "number",
+      "unit": "percent",
+      "generator": {
+        "type": "random",
+        "min": 30,
+        "max": 70,
+        "distribution": "uniform"
+      },
+      "intervalMs": 5000
+    },
+    {
+      "name": "batteryLevel",
+      "type": "integer",
+      "unit": "percent",
+      "generator": {
+        "type": "sequence",
+        "start": 100,
+        "step": -1,
+        "min": 0,
+        "max": 100,
+        "wrap": false
+      },
+      "intervalMs": 60000
+    }
+  ],
+  "commands": [
+    {
+      "name": "setInterval",
+      "topic": "devices/${deviceId}/commands/setInterval",
+      "parameters": [
+        {
+          "name": "intervalMs",
+          "type": "integer",
+          "required": true
+        }
+      ]
+    }
+  ],
+  "behaviors": [
+    {
+      "name": "lowBatteryAlert",
+      "trigger": {
+        "type": "condition",
+        "condition": "batteryLevel < 20"
+      },
+      "action": {
+        "type": "publish",
+        "topic": "devices/${deviceId}/alerts",
+        "payload": {
+          "type": "lowBattery",
+          "level": "${batteryLevel}"
+        }
+      }
+    }
+  ],
+  "metadata": {
+    "manufacturer": "IoTix Demo",
+    "firmwareVersion": "1.0.0"
+  }
+}

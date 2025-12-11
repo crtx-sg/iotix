@@ -1,0 +1,25 @@
+# Core dependencies
+fastapi>=0.104.0
+uvicorn>=0.24.0
+pydantic>=2.5.0
+pydantic-settings>=2.1.0
+
+# Protocol adapters
+paho-mqtt>=1.6.1
+aiocoap>=0.4.7
+aiohttp>=3.9.0
+httpx>=0.25.0
+
+# Message queue
+aiokafka>=0.9.0
+
+# Metrics
+influxdb-client>=1.38.0
+
+# Schema validation
+jsonschema>=4.20.0
+
+# Utilities
+python-json-logger>=2.0.7
+croniter>=2.0.1
+structlog>=23.2.0

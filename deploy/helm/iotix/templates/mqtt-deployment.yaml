@@ -1,0 +1,113 @@
+{{- if .Values.mqtt.enabled }}
+{{- if eq .Values.mqtt.broker "vernemq" }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "iotix.mqtt.fullname" . }}
+  labels:
+    {{- include "iotix.labels" . | nindent 4 }}
+    app.kubernetes.io/component: mqtt
+spec:
+  replicas: {{ .Values.mqtt.vernemq.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "iotix.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: mqtt
+  template:
+    metadata:
+      labels:
+        {{- include "iotix.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: mqtt
+    spec:
+      containers:
+        - name: vernemq
+          image: "{{ .Values.mqtt.vernemq.image.repository }}:{{ .Values.mqtt.vernemq.image.tag }}"
+          ports:
+            - name: mqtt
+              containerPort: 1883
+              protocol: TCP
+            - name: websocket
+              containerPort: 9001
+              protocol: TCP
+            - name: cluster
+              containerPort: 44053
+              protocol: TCP
+          env:
+            - name: DOCKER_VERNEMQ_ACCEPT_EULA
+              value: "yes"
+            - name: DOCKER_VERNEMQ_ALLOW_ANONYMOUS
+              value: {{ .Values.mqtt.vernemq.config.allowAnonymous | quote }}
+            - name: DOCKER_VERNEMQ_MAX_CLIENT_ID_SIZE
+              value: {{ .Values.mqtt.vernemq.config.maxClientIdSize | quote }}
+            - name: DOCKER_VERNEMQ_MAX_CONNECTIONS
+              value: {{ .Values.mqtt.vernemq.config.maxConnections | quote }}
+          {{- if .Values.mqtt.vernemq.persistence.enabled }}
+          volumeMounts:
+            - name: data
+              mountPath: /vernemq/data
+          {{- end }}
+          resources:
+            {{- toYaml .Values.mqtt.vernemq.resources | nindent 12 }}
+          livenessProbe:
+            tcpSocket:
+              port: mqtt
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          readinessProbe:
+            tcpSocket:
+              port: mqtt
+            initialDelaySeconds: 10
+            periodSeconds: 5
+      {{- if .Values.mqtt.vernemq.persistence.enabled }}
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ include "iotix.mqtt.fullname" . }}-data
+      {{- end }}
+{{- else if eq .Values.mqtt.broker "emqx" }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "iotix.mqtt.fullname" . }}
+  labels:
+    {{- include "iotix.labels" . | nindent 4 }}
+    app.kubernetes.io/component: mqtt
+spec:
+  replicas: {{ .Values.mqtt.emqx.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "iotix.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: mqtt
+  template:
+    metadata:
+      labels:
+        {{- include "iotix.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: mqtt
+    spec:
+      containers:
+        - name: emqx
+          image: "{{ .Values.mqtt.emqx.image.repository }}:{{ .Values.mqtt.emqx.image.tag }}"
+          ports:
+            - name: mqtt
+              containerPort: 1883
+              protocol: TCP
+            - name: websocket
+              containerPort: 8083
+              protocol: TCP
+            - name: dashboard
+              containerPort: 18083
+              protocol: TCP
+          resources:
+            {{- toYaml .Values.mqtt.emqx.resources | nindent 12 }}
+          livenessProbe:
+            tcpSocket:
+              port: mqtt
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          readinessProbe:
+            tcpSocket:
+              port: mqtt
+            initialDelaySeconds: 10
+            periodSeconds: 5
+{{- end }}
+{{- end }}

@@ -1,0 +1,45 @@
+# Chaos Mesh NetworkChaos Template: Satellite Link
+# Simulates high-latency satellite connection
+# Latency: 600ms (typical for satellite), Jitter: 100ms, Loss: 2%
+apiVersion: chaos-mesh.org/v1alpha1
+kind: NetworkChaos
+metadata:
+  name: satellite-link
+  namespace: {{ .Release.Namespace }}
+  labels:
+    iotix.io/template: satellite-link
+    iotix.io/category: network-simulation
+spec:
+  action: delay
+  mode: all
+  selector:
+    namespaces:
+      - {{ .Release.Namespace }}
+    labelSelectors:
+      app.kubernetes.io/component: device-engine
+  delay:
+    latency: "600ms"
+    jitter: "100ms"
+    correlation: "50"
+  duration: "{{ .Values.duration | default "10m" }}"
+---
+apiVersion: chaos-mesh.org/v1alpha1
+kind: NetworkChaos
+metadata:
+  name: satellite-link-loss
+  namespace: {{ .Release.Namespace }}
+  labels:
+    iotix.io/template: satellite-link
+    iotix.io/category: network-simulation
+spec:
+  action: loss
+  mode: all
+  selector:
+    namespaces:
+      - {{ .Release.Namespace }}
+    labelSelectors:
+      app.kubernetes.io/component: device-engine
+  loss:
+    loss: "2"
+    correlation: "10"
+  duration: "{{ .Values.duration | default "10m" }}"

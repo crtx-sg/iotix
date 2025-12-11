@@ -1,0 +1,19 @@
+{{- if .Values.deviceEngine.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "iotix.deviceEngine.fullname" . }}
+  labels:
+    {{- include "iotix.labels" . | nindent 4 }}
+    app.kubernetes.io/component: device-engine
+spec:
+  type: {{ .Values.deviceEngine.service.type }}
+  ports:
+    - port: {{ .Values.deviceEngine.service.port }}
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    {{- include "iotix.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: device-engine
+{{- end }}

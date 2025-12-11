@@ -1,0 +1,104 @@
+{{- if .Values.deviceEngine.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "iotix.deviceEngine.fullname" . }}
+  labels:
+    {{- include "iotix.labels" . | nindent 4 }}
+    app.kubernetes.io/component: device-engine
+spec:
+  {{- if not .Values.deviceEngine.autoscaling.enabled }}
+  replicas: {{ .Values.deviceEngine.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "iotix.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: device-engine
+  template:
+    metadata:
+      labels:
+        {{- include "iotix.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: device-engine
+    spec:
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "iotix.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: device-engine
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: "{{ .Values.global.imageRegistry }}{{ .Values.deviceEngine.image.repository }}:{{ .Values.deviceEngine.image.tag }}"
+          imagePullPolicy: {{ .Values.deviceEngine.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          env:
+            - name: LOG_LEVEL
+              value: {{ .Values.deviceEngine.config.logLevel | quote }}
+            - name: MAX_DEVICES_PER_INSTANCE
+              value: {{ .Values.deviceEngine.config.maxDevicesPerInstance | quote }}
+            - name: MQTT_BROKER_HOST
+              value: {{ include "iotix.mqtt.host" . | quote }}
+            - name: MQTT_BROKER_PORT
+              value: "1883"
+            - name: KAFKA_BOOTSTRAP_SERVERS
+              value: {{ include "iotix.kafka.bootstrapServers" . | quote }}
+            - name: INFLUXDB_URL
+              value: {{ include "iotix.influxdb.url" . | quote }}
+            {{- if .Values.influxdb.enabled }}
+            - name: INFLUXDB_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "iotix.fullname" . }}-influxdb
+                  key: token
+            {{- end }}
+            - name: INFLUXDB_ORG
+              value: {{ .Values.influxdb.auth.admin.org | quote }}
+            - name: INFLUXDB_BUCKET
+              value: {{ .Values.influxdb.auth.admin.bucket | quote }}
+            - name: DEVICE_MODEL_PATH
+              value: /app/device-models
+          {{- if .Values.deviceEngine.deviceModels.enabled }}
+          volumeMounts:
+            - name: device-models
+              mountPath: /app/device-models
+              readOnly: true
+          {{- end }}
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.deviceEngine.resources | nindent 12 }}
+      {{- if .Values.deviceEngine.deviceModels.enabled }}
+      volumes:
+        - name: device-models
+          configMap:
+            name: {{ .Values.deviceEngine.deviceModels.configMapName | default (printf "%s-device-models" (include "iotix.fullname" .)) }}
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}
