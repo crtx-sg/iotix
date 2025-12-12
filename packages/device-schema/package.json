@@ -2,6 +2,7 @@
   "name": "@iotix/device-schema",
   "version": "0.1.0",
   "description": "JSON Schema definitions and validators for iotix device models",
+  "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "files": [

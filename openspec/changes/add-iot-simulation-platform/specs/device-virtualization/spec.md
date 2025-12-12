@@ -68,16 +68,58 @@ The system SHALL generate realistic telemetry data based on device model specifi
 #### Scenario: Sequence value generation
 - **WHEN** a telemetry attribute specifies generator type "sequence"
 - **THEN** the system generates incrementing or decrementing values
+- **AND** supports configurable start, step, min, max, and wrap behavior
+
+#### Scenario: Constant value generation
+- **WHEN** a telemetry attribute specifies generator type "constant"
+- **THEN** the system returns the same configured value on each interval
 
 #### Scenario: Historical replay
 - **WHEN** a telemetry attribute specifies generator type "replay"
 - **THEN** the system replays data from a historical dataset file
 - **AND** maintains timing intervals from the original data
+- **AND** supports looping when data is exhausted
 
 #### Scenario: Custom payload generation
 - **WHEN** a telemetry attribute specifies generator type "custom"
 - **THEN** the system invokes the custom Python hook
 - **AND** uses the returned payload (including binary formats)
+
+### Requirement: Multi-Parameter Telemetry
+The system SHALL support device models with multiple telemetry parameters of different types and intervals.
+
+#### Scenario: Multiple numeric parameters
+- **WHEN** a device model defines multiple telemetry attributes (e.g., temperature, pressure, humidity)
+- **THEN** the system generates values for each attribute independently
+- **AND** each attribute can have its own generator configuration and interval
+
+#### Scenario: Mixed data types
+- **WHEN** a device model defines telemetry with different data types (number, integer, boolean, string, binary)
+- **THEN** the system generates appropriate values for each type
+- **AND** serializes the payload according to the protocol requirements
+
+#### Scenario: Independent intervals
+- **WHEN** telemetry attributes specify different intervalMs values
+- **THEN** the system publishes each attribute at its configured interval
+- **AND** attributes are not synchronized unless explicitly configured
+
+### Requirement: Binary Data Support
+The system SHALL support binary telemetry data for sensors that produce raw binary output (e.g., ECG, images, audio).
+
+#### Scenario: Binary array telemetry
+- **WHEN** a telemetry attribute specifies type "binary" with a samples count
+- **THEN** the system generates the specified number of samples as a binary array
+- **AND** supports configurable sample size (8-bit, 16-bit, 32-bit)
+
+#### Scenario: Replay from binary file
+- **WHEN** a telemetry attribute specifies generator type "replay" with a binary data file
+- **THEN** the system reads chunks from the binary file at each interval
+- **AND** transmits raw bytes without JSON encoding
+
+#### Scenario: Custom binary generator
+- **WHEN** a telemetry attribute specifies generator type "custom" with a binary handler
+- **THEN** the custom Python function returns raw bytes
+- **AND** the system transmits the binary payload directly
 
 ### Requirement: Device Lifecycle Management
 The system SHALL manage the complete lifecycle of virtual devices: create, start, stop, and destroy.

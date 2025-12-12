@@ -6,6 +6,8 @@ node_modules/
 *.pyc
 .venv/
 venv/
+*-env/
+iotix-env/
 
 # Build outputs
 dist/
@@ -37,6 +39,9 @@ coverage/
 .nyc_output/
 htmlcov/
 .pytest_cache/
+.coverage
+*.cover
+*.py,cover
 
 # Docker
 .docker/
@@ -50,3 +55,21 @@ htmlcov/
 tmp/
 temp/
 *.tmp
+
+# Package manager lock files (optional for monorepos)
+# package-lock.json
+# yarn.lock
+
+# mypy
+.mypy_cache/
+
+# ruff
+.ruff_cache/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Test results
+*.jtl
+results/
+reports/

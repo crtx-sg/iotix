@@ -1,4 +1,5 @@
-import Ajv, { ErrorObject } from 'ajv';
+import Ajv from 'ajv';
+import type { ErrorObject, ValidateFunction } from 'ajv';
 import addFormats from 'ajv-formats';
 import { deviceModelSchema } from './schema.js';
 import type { DeviceModel } from './types.js';
@@ -26,16 +27,16 @@ export interface ValidationResult {
  * Validator for device model JSON documents
  */
 export class DeviceModelValidator {
-  private ajv: Ajv;
-  private validate: ReturnType<Ajv['compile']>;
+  private ajv: Ajv.default;
+  private validate: ValidateFunction;
 
   constructor() {
-    this.ajv = new Ajv({
+    this.ajv = new Ajv.default({
       allErrors: true,
       verbose: true,
       strict: true,
     });
-    addFormats(this.ajv);
+    addFormats.default(this.ajv);
     this.validate = this.ajv.compile(deviceModelSchema);
   }
 
