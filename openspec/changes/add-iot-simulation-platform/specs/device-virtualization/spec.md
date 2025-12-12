@@ -154,13 +154,94 @@ The system SHALL support batch operations on device groups for managing large nu
 
 #### Scenario: Start device group
 - **WHEN** a start command is issued for a device group
-- **THEN** all devices in the group start with configurable stagger delay
+- **THEN** all devices in the group start with configurable launch strategy
 - **AND** the system reports aggregate start status
 
 #### Scenario: Stop device group
 - **WHEN** a stop command is issued for a device group
 - **THEN** all devices in the group stop gracefully
 - **AND** the system reports aggregate stop status
+
+### Requirement: Scale Launch Strategies
+The system SHALL support multiple launch strategies for starting large numbers of devices with controlled resource utilization.
+
+#### Scenario: Immediate launch strategy
+- **WHEN** a device group is started with strategy "immediate"
+- **THEN** the system starts all devices concurrently
+- **AND** maximizes startup throughput
+
+#### Scenario: Linear launch strategy
+- **WHEN** a device group is started with strategy "linear" and a delay value
+- **THEN** the system starts devices one at a time with fixed delay between each
+- **AND** provides predictable, controlled ramp-up
+
+#### Scenario: Batch launch strategy
+- **WHEN** a device group is started with strategy "batch", batch size, and delay
+- **THEN** the system starts devices in batches of the specified size
+- **AND** waits for the configured delay between batches
+- **AND** balances speed with resource management
+
+#### Scenario: Exponential launch strategy
+- **WHEN** a device group is started with strategy "exponential", base delay, and exponent
+- **THEN** the system starts devices with exponentially increasing delays
+- **AND** delays are calculated as: delay_ms × (exponent_base ^ device_index)
+- **AND** delays are capped at a configurable maximum
+
+#### Scenario: Launch configuration
+- **WHEN** a launch configuration is provided
+- **THEN** the system accepts the following parameters:
+  - strategy: immediate | linear | batch | exponential
+  - delayMs: base delay in milliseconds
+  - batchSize: number of devices per batch (for batch strategy)
+  - maxDelayMs: maximum delay cap (for exponential strategy)
+  - exponentBase: multiplier for exponential delay calculation
+
+### Requirement: Device Dropout Simulation
+The system SHALL support simulating device dropouts/failures for chaos engineering and resilience testing.
+
+#### Scenario: Immediate dropout strategy
+- **WHEN** a device group dropout is initiated with strategy "immediate"
+- **THEN** the system disconnects all specified devices at once
+- **AND** simulates sudden mass device failure
+
+#### Scenario: Linear dropout strategy
+- **WHEN** a device group dropout is initiated with strategy "linear" and a delay value
+- **THEN** the system disconnects devices one at a time with fixed delay between each
+- **AND** simulates gradual device degradation
+
+#### Scenario: Exponential dropout strategy
+- **WHEN** a device group dropout is initiated with strategy "exponential", base delay, and exponent
+- **THEN** the system disconnects devices with exponentially increasing delays
+- **AND** delays are calculated as: delay_ms × (exponent_base ^ device_index)
+- **AND** simulates accelerating failure cascade
+
+#### Scenario: Random dropout strategy
+- **WHEN** a device group dropout is initiated with strategy "random" and a duration window
+- **THEN** the system disconnects devices at random intervals within the time window
+- **AND** simulates unpredictable real-world failure patterns
+
+#### Scenario: Dropout configuration
+- **WHEN** a dropout configuration is provided
+- **THEN** the system accepts the following parameters:
+  - strategy: immediate | linear | exponential | random
+  - count: absolute number of devices to drop (optional)
+  - percentage: percentage of devices to drop (optional, used if count not specified)
+  - delayMs: base delay between dropouts in milliseconds
+  - durationMs: total duration for dropout simulation (for random strategy)
+  - exponentBase: multiplier for exponential delay calculation
+  - reconnect: whether devices should reconnect after dropout
+  - reconnectDelayMs: delay before reconnection attempt
+
+#### Scenario: Dropout with automatic reconnection
+- **WHEN** a dropout configuration specifies reconnect: true
+- **THEN** the system disconnects the devices according to the strategy
+- **AND** after reconnectDelayMs, the affected devices attempt to reconnect
+- **AND** the system reports reconnection success/failure
+
+#### Scenario: Dropout via API
+- **WHEN** a POST request is made to /api/v1/groups/{groupId}/dropout with dropout config
+- **THEN** the system initiates the dropout simulation
+- **AND** returns the number of devices affected and estimated duration
 
 ### Requirement: Device Behavior Engine
 The system SHALL execute device behaviors defined as state machines with triggers and actions.

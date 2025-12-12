@@ -11,6 +11,127 @@ Open-source IoT device simulation platform for testing at scale. Supports MQTT, 
 - **Real-time Monitoring**: Grafana dashboards with InfluxDB metrics storage
 - **Multi-tenant Management**: User/tenant management with RBAC and audit logging
 
+---
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                                   CLIENTS                                        │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────────────┐   │
+│  │ Web UI   │  │ REST API │  │   CLI    │  │ CI/CD    │  │ External Systems │   │
+│  │          │  │ Clients  │  │          │  │ Pipelines│  │ (ThingsBoard)    │   │
+│  └────┬─────┘  └────┬─────┘  └────┬─────┘  └────┬─────┘  └────────┬─────────┘   │
+└───────┼─────────────┼─────────────┼─────────────┼─────────────────┼─────────────┘
+        │             │             │             │                 │
+        └─────────────┴──────┬──────┴─────────────┴─────────────────┘
+                             │
+┌────────────────────────────┼────────────────────────────────────────────────────┐
+│                    MANAGEMENT LAYER                                              │
+│  ┌─────────────────────────┴─────────────────────────┐                          │
+│  │              Management API (:8082)                │                          │
+│  │  ┌───────────┐ ┌───────────┐ ┌─────────────────┐  │                          │
+│  │  │   Auth    │ │   RBAC    │ │  Audit Logging  │  │                          │
+│  │  │  (JWT)    │ │           │ │                 │  │                          │
+│  │  └───────────┘ └───────────┘ └─────────────────┘  │                          │
+│  │  ┌───────────┐ ┌───────────┐ ┌─────────────────┐  │                          │
+│  │  │   User    │ │  Tenant   │ │    API Key      │  │                          │
+│  │  │Management │ │Management │ │   Management    │  │                          │
+│  │  └───────────┘ └───────────┘ └─────────────────┘  │                          │
+│  └───────────────────────┬───────────────────────────┘                          │
+└──────────────────────────┼──────────────────────────────────────────────────────┘
+                           │
+        ┌──────────────────┼──────────────────┐
+        │                  │                  │
+        ▼                  ▼                  ▼
+┌───────────────┐  ┌───────────────┐  ┌───────────────────────────────────────────┐
+│  TEST LAYER   │  │ DEVICE LAYER  │  │              INFRASTRUCTURE               │
+│               │  │               │  │                                           │
+│ ┌───────────┐ │  │ ┌───────────┐ │  │  ┌─────────────┐    ┌─────────────────┐  │
+│ │   Test    │ │  │ │  Device   │ │  │  │    Kafka    │    │    InfluxDB     │  │
+│ │  Engine   │─┼──┼▶│  Engine   │─┼──┼─▶│   (:9092)   │    │    (:8086)      │  │
+│ │  (:8081)  │ │  │ │  (:8080)  │ │  │  │             │    │                 │  │
+│ └───────────┘ │  │ └─────┬─────┘ │  │  │  Telemetry  │    │  Time-series    │  │
+│               │  │       │       │  │  │   Events    │    │    Metrics      │  │
+│ ┌───────────┐ │  │       │       │  │  └─────────────┘    └────────┬────────┘  │
+│ │  Suites   │ │  │       │       │  │                              │           │
+│ │  Runs     │ │  │       ▼       │  │                              ▼           │
+│ │ Schedules │ │  │ ┌───────────┐ │  │                     ┌─────────────────┐  │
+│ │  Reports  │ │  │ │ Protocol  │ │  │                     │     Grafana     │  │
+│ └───────────┘ │  │ │ Adapters  │ │  │                     │    (:3000)      │  │
+└───────────────┘  │ │           │ │  │                     │                 │  │
+                   │ │┌─────────┐│ │  │                     │   Dashboards    │  │
+                   │ ││  MQTT   ││ │  │                     │    Alerts       │  │
+                   │ │└────┬────┘│ │  │                     └─────────────────┘  │
+                   │ │┌─────────┐│ │  │                                          │
+                   │ ││  CoAP   ││ │  └──────────────────────────────────────────┘
+                   │ │└─────────┘│ │
+                   │ │┌─────────┐│ │
+                   │ ││  HTTP   ││ │
+                   │ │└─────────┘│ │
+                   │ └─────┬─────┘ │
+                   └───────┼───────┘
+                           │
+                           ▼
+              ┌────────────────────────┐
+              │     MQTT Broker        │
+              │   (Mosquitto :1883)    │
+              │                        │
+              │  ┌──────────────────┐  │
+              │  │ Virtual Devices  │  │
+              │  │    publish to    │  │
+              │  │   MQTT topics    │  │
+              │  └──────────────────┘  │
+              └────────────────────────┘
+```
+
+### Component Interactions
+
+#### Core Services
+
+| Component | Port | Description |
+|-----------|------|-------------|
+| **Device Engine** | 8080 | Core simulation service. Creates and manages virtual IoT devices, generates telemetry data, and publishes to MQTT/CoAP/HTTP endpoints. |
+| **Test Engine** | 8081 | Test execution service. Manages test suites, runs, schedules, and generates reports. Integrates with Robot Framework, JMeter, and Locust. |
+| **Management API** | 8082 | Administration service. Handles user authentication (JWT), RBAC, tenant management, API keys, and audit logging. |
+
+#### Infrastructure Services
+
+| Component | Port | Description |
+|-----------|------|-------------|
+| **MQTT Broker** | 1883 | Eclipse Mosquitto message broker. Virtual devices publish telemetry to MQTT topics. External systems can subscribe to receive data. |
+| **Kafka** | 9092 | High-throughput message streaming. Used for telemetry events and inter-service communication at scale. |
+| **InfluxDB** | 8086 | Time-series database. Stores device metrics, telemetry history, and performance data. |
+| **Grafana** | 3000 | Visualization and monitoring. Provides dashboards for real-time metrics, device status, and alerting. |
+
+### Data Flow
+
+```
+1. DEVICE CREATION
+   User/API ──▶ Management API ──▶ Device Engine ──▶ Create Virtual Device
+
+2. TELEMETRY GENERATION
+   Device Engine ──▶ Generate Data ──▶ Protocol Adapter ──▶ MQTT Broker
+                                                         ──▶ Kafka (events)
+                                                         ──▶ InfluxDB (metrics)
+
+3. MONITORING
+   InfluxDB ──▶ Grafana ──▶ Dashboards/Alerts ──▶ User
+
+4. TEST EXECUTION
+   User/CI ──▶ Test Engine ──▶ Device Engine ──▶ Run Tests ──▶ Generate Reports
+```
+
+### Protocol Support
+
+| Protocol | Port | Use Case |
+|----------|------|----------|
+| **MQTT** | 1883 | Primary IoT protocol. Lightweight pub/sub messaging for sensors and actuators. |
+| **CoAP** | 5683 | Constrained devices. UDP-based protocol for resource-limited IoT devices. |
+| **HTTP** | 8080 | REST APIs. Standard HTTP/HTTPS for device management and data ingestion. |
+
+---
+
 ## Project Structure
 
 ```
@@ -459,6 +580,291 @@ For sensors that produce raw binary data like ECG, accelerometer arrays, or audi
 | `boolean` | True/false | true, false |
 | `string` | Text string | "connected", "active" |
 | `binary` | Raw binary data | ECG samples, images |
+
+---
+
+## Launching Devices at Scale
+
+IoTix supports launching thousands of devices with configurable launch strategies to control resource utilization and simulate realistic deployment scenarios.
+
+### Creating a Device Group
+
+Create a group of devices from a model:
+
+```bash
+# Create 5000 temperature sensors
+curl -X POST http://localhost:8080/api/v1/groups \
+  -H "Content-Type: application/json" \
+  -d '{
+    "modelId": "temperature-sensor-v1",
+    "count": 5000,
+    "groupId": "temp-sensors-batch-1",
+    "idPattern": "temp-sensor-{index}"
+  }'
+```
+
+### Launch Strategies
+
+When starting a device group, you can choose from four launch strategies:
+
+| Strategy | Description | Use Case |
+|----------|-------------|----------|
+| `immediate` | Start all devices at once | Maximum throughput, sufficient resources |
+| `linear` | Fixed delay between each device | Controlled ramp-up, predictable load |
+| `batch` | Start in batches with delay between batches | Balance between speed and resource management |
+| `exponential` | Exponentially increasing delay | Gradual warm-up, stress testing |
+
+### Strategy Examples
+
+#### 1. Immediate (All at Once)
+
+Start all 5000 devices simultaneously:
+
+```bash
+curl -X POST http://localhost:8080/api/v1/groups/temp-sensors-batch-1/start \
+  -H "Content-Type: application/json" \
+  -d '{
+    "strategy": "immediate"
+  }'
+```
+
+#### 2. Linear (Fixed Delay)
+
+Start devices with 10ms delay between each:
+
+```bash
+curl -X POST http://localhost:8080/api/v1/groups/temp-sensors-batch-1/start \
+  -H "Content-Type: application/json" \
+  -d '{
+    "strategy": "linear",
+    "delayMs": 10
+  }'
+```
+
+Timeline for 5000 devices: ~50 seconds total
+
+#### 3. Batch (Groups with Delay)
+
+Start 100 devices at a time, with 1 second between batches:
+
+```bash
+curl -X POST http://localhost:8080/api/v1/groups/temp-sensors-batch-1/start \
+  -H "Content-Type: application/json" \
+  -d '{
+    "strategy": "batch",
+    "batchSize": 100,
+    "delayMs": 1000
+  }'
+```
+
+Timeline for 5000 devices: 50 batches × 1s = ~50 seconds
+
+#### 4. Exponential (Gradual Ramp-up)
+
+Start with small delay, increasing exponentially:
+
+```bash
+curl -X POST http://localhost:8080/api/v1/groups/temp-sensors-batch-1/start \
+  -H "Content-Type: application/json" \
+  -d '{
+    "strategy": "exponential",
+    "delayMs": 1,
+    "exponentBase": 1.1,
+    "maxDelayMs": 5000
+  }'
+```
+
+Delay pattern: 1ms, 1.1ms, 1.21ms, 1.33ms... (capped at 5000ms)
+
+### Launch Configuration Reference
+
+```json
+{
+  "strategy": "batch",
+  "delayMs": 1000,
+  "batchSize": 100,
+  "maxDelayMs": 60000,
+  "exponentBase": 1.5
+}
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `strategy` | string | `immediate` | Launch strategy: `immediate`, `linear`, `batch`, `exponential` |
+| `delayMs` | integer | `0` | Base delay in milliseconds |
+| `batchSize` | integer | `100` | Number of devices per batch (for `batch` strategy) |
+| `maxDelayMs` | integer | `60000` | Maximum delay cap (for `exponential` strategy) |
+| `exponentBase` | float | `1.5` | Exponent multiplier (for `exponential` strategy) |
+
+### Scaling Recommendations
+
+| Device Count | Recommended Strategy | Configuration |
+|--------------|---------------------|---------------|
+| 1-100 | `immediate` | Default |
+| 100-1,000 | `linear` | `delayMs: 10` |
+| 1,000-10,000 | `batch` | `batchSize: 100, delayMs: 500` |
+| 10,000-100,000 | `batch` | `batchSize: 500, delayMs: 1000` |
+| 100,000+ | `batch` | `batchSize: 1000, delayMs: 2000` + Kubernetes HPA |
+
+### Managing Device Groups
+
+```bash
+# List devices in a group
+curl "http://localhost:8080/api/v1/devices?groupId=temp-sensors-batch-1"
+
+# Stop all devices in a group
+curl -X POST http://localhost:8080/api/v1/groups/temp-sensors-batch-1/stop
+
+# Delete a group and all its devices
+curl -X DELETE http://localhost:8080/api/v1/groups/temp-sensors-batch-1
+```
+
+### Monitoring Scale Launches
+
+During large-scale launches, monitor progress via:
+
+```bash
+# Get engine statistics
+curl http://localhost:8080/api/v1/stats
+
+# Response includes:
+# - deviceCount: Total devices
+# - runningDeviceCount: Currently running
+# - messagesSent: Total messages published
+```
+
+Use Grafana dashboards at http://localhost:3000 for real-time visualization of:
+- Device connection rates
+- Telemetry throughput
+- Resource utilization
+- Error rates
+
+---
+
+## Device Dropout Simulation
+
+IoTix supports simulating device dropouts and failures for chaos engineering and resilience testing. This allows you to test how your IoT backend handles various failure scenarios.
+
+### Dropout Strategies
+
+| Strategy | Description | Use Case |
+|----------|-------------|----------|
+| `immediate` | All specified devices drop at once | Mass failure, network outage simulation |
+| `linear` | Fixed delay between each dropout | Gradual degradation testing |
+| `exponential` | Exponentially increasing dropout rate | Cascading failure simulation |
+| `random` | Random dropouts within a time window | Realistic unpredictable failure patterns |
+
+### Basic Dropout Examples
+
+```bash
+# Drop 50% of devices in a group immediately
+curl -X POST http://localhost:8080/api/v1/groups/sensor-group/dropout \
+  -H "Content-Type: application/json" \
+  -d '{
+    "strategy": "immediate",
+    "percentage": 50
+  }'
+
+# Drop 100 devices with linear delay (1 second between each)
+curl -X POST http://localhost:8080/api/v1/groups/sensor-group/dropout \
+  -H "Content-Type: application/json" \
+  -d '{
+    "strategy": "linear",
+    "count": 100,
+    "delayMs": 1000
+  }'
+
+# Exponential dropout (accelerating failure cascade)
+curl -X POST http://localhost:8080/api/v1/groups/sensor-group/dropout \
+  -H "Content-Type: application/json" \
+  -d '{
+    "strategy": "exponential",
+    "percentage": 30,
+    "delayMs": 100,
+    "exponentBase": 1.5
+  }'
+
+# Random dropouts over 60 seconds
+curl -X POST http://localhost:8080/api/v1/groups/sensor-group/dropout \
+  -H "Content-Type: application/json" \
+  -d '{
+    "strategy": "random",
+    "percentage": 25,
+    "durationMs": 60000
+  }'
+```
+
+### Dropout with Automatic Reconnection
+
+Simulate temporary failures where devices automatically recover:
+
+```bash
+# Drop 20% of devices, reconnect after 30 seconds
+curl -X POST http://localhost:8080/api/v1/groups/sensor-group/dropout \
+  -H "Content-Type: application/json" \
+  -d '{
+    "strategy": "linear",
+    "percentage": 20,
+    "delayMs": 500,
+    "reconnect": true,
+    "reconnectDelayMs": 30000
+  }'
+```
+
+### Dropout Configuration Parameters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `strategy` | string | `linear` | Dropout strategy: `immediate`, `linear`, `exponential`, `random` |
+| `count` | integer | - | Absolute number of devices to drop (takes precedence over percentage) |
+| `percentage` | float | - | Percentage of devices to drop (0-100) |
+| `delayMs` | integer | `1000` | Base delay between dropouts in milliseconds |
+| `durationMs` | integer | `60000` | Total duration for random strategy |
+| `exponentBase` | float | `1.5` | Exponent multiplier for exponential strategy |
+| `reconnect` | boolean | `false` | Whether devices should reconnect after dropout |
+| `reconnectDelayMs` | integer | `0` | Delay before reconnection attempt |
+
+### Chaos Engineering Scenarios
+
+**Scenario 1: Network Partition**
+```bash
+# Simulate network partition affecting 30% of devices
+curl -X POST http://localhost:8080/api/v1/groups/production-sensors/dropout \
+  -H "Content-Type: application/json" \
+  -d '{
+    "strategy": "immediate",
+    "percentage": 30,
+    "reconnect": true,
+    "reconnectDelayMs": 120000
+  }'
+```
+
+**Scenario 2: Cascading Failure**
+```bash
+# Simulate cascading failure starting slow then accelerating
+curl -X POST http://localhost:8080/api/v1/groups/critical-sensors/dropout \
+  -H "Content-Type: application/json" \
+  -d '{
+    "strategy": "exponential",
+    "percentage": 50,
+    "delayMs": 1000,
+    "exponentBase": 2.0
+  }'
+```
+
+**Scenario 3: Random Real-World Failures**
+```bash
+# Simulate random device failures over 5 minutes
+curl -X POST http://localhost:8080/api/v1/groups/field-devices/dropout \
+  -H "Content-Type: application/json" \
+  -d '{
+    "strategy": "random",
+    "count": 200,
+    "durationMs": 300000,
+    "reconnect": true,
+    "reconnectDelayMs": 60000
+  }'
+```
 
 ---
 

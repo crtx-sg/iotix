@@ -15,6 +15,8 @@ Organizations testing IoT systems face significant challenges: physical device p
 ### New Capabilities
 
 - **Device Virtualization Layer**: JSON-based device models generating realistic telemetry, events, and behaviors across MQTT/CoAP/HTTP protocols with support for custom binary payloads and multi-parameter configurations
+- **Scale Launch Strategies**: Configurable device launch strategies (immediate, linear, batch, exponential) for launching thousands to millions of devices with controlled resource utilization
+- **Device Dropout Simulation**: Chaos engineering support for simulating device failures with multiple strategies (immediate, linear, exponential, random) and optional automatic reconnection
 - **Orchestration & Backend**: Docker Compose for development, Kubernetes-based container orchestration with Kafka message brokering for high-throughput (1M msgs/sec) device simulation in production
 - **Network Simulation**: Chaos engineering integration for simulating latency, packet loss, and network partitions
 - **Test Engine**: Robot Framework + JMeter + Locust integration for keyword-driven functional tests and performance/load testing with CI/CD hooks
@@ -84,3 +86,5 @@ Organizations testing IoT systems face significant challenges: physical device p
 5. ✅ Deploy on both cloud (AWS/GCP) and on-premises (Docker/MicroK8s)
 6. ✅ Custom device models with multi-parameter telemetry and binary data support
 7. ✅ Full test coverage for all services
+8. ✅ Configurable launch strategies for scale testing (immediate, linear, batch, exponential)
+9. ✅ Device dropout/failure simulation for chaos engineering (immediate, linear, exponential, random)

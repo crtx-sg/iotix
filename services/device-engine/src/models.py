@@ -167,6 +167,66 @@ class CreateDeviceRequest(BaseModel):
     )
 
 
+class LaunchStrategy(str, Enum):
+    """Device launch strategy enumeration."""
+
+    IMMEDIATE = "immediate"  # All at once
+    LINEAR = "linear"  # Fixed delay between each device
+    BATCH = "batch"  # Launch in batches with delay between batches
+    EXPONENTIAL = "exponential"  # Exponentially increasing delay
+
+
+class LaunchConfig(BaseModel):
+    """Configuration for device launch strategy."""
+
+    strategy: LaunchStrategy = LaunchStrategy.IMMEDIATE
+    delay_ms: int = Field(0, alias="delayMs", ge=0)  # Base delay in milliseconds
+    batch_size: int = Field(100, alias="batchSize", ge=1)  # For batch strategy
+    max_delay_ms: int = Field(60000, alias="maxDelayMs", ge=0)  # Cap for exponential
+    exponent_base: float = Field(1.5, alias="exponentBase", ge=1.0)  # For exponential
+
+
+class DropoutStrategy(str, Enum):
+    """Device dropout/failure strategy enumeration."""
+
+    IMMEDIATE = "immediate"  # All specified devices drop at once
+    LINEAR = "linear"  # Fixed delay between each dropout
+    EXPONENTIAL = "exponential"  # Exponentially increasing dropout rate
+    RANDOM = "random"  # Random dropouts within a time window
+
+
+class DropoutConfig(BaseModel):
+    """Configuration for device dropout/failure simulation."""
+
+    strategy: DropoutStrategy = DropoutStrategy.LINEAR
+    count: int | None = Field(None, ge=1)  # Number of devices to drop (None = percentage-based)
+    percentage: float | None = Field(None, ge=0, le=100)  # Percentage of devices to drop
+    delay_ms: int = Field(1000, alias="delayMs", ge=0)  # Base delay between dropouts
+    duration_ms: int = Field(60000, alias="durationMs", ge=0)  # Total duration for dropouts
+    exponent_base: float = Field(1.5, alias="exponentBase", ge=1.0)  # For exponential strategy
+    reconnect: bool = False  # Whether devices should reconnect after dropout
+    reconnect_delay_ms: int = Field(0, alias="reconnectDelayMs", ge=0)  # Delay before reconnect
+
+
+class DropoutRequest(BaseModel):
+    """Request to simulate device dropouts in a group."""
+
+    group_id: str = Field(alias="groupId")
+    config: DropoutConfig
+
+
+class DropoutResponse(BaseModel):
+    """Response for dropout operation."""
+
+    group_id: str = Field(alias="groupId")
+    devices_affected: int = Field(alias="devicesAffected")
+    dropout_strategy: str = Field(alias="dropoutStrategy")
+    status: str
+    estimated_duration_ms: int = Field(alias="estimatedDurationMs")
+
+    model_config = {"populate_by_name": True}
+
+
 class CreateDeviceGroupRequest(BaseModel):
     """Request to create a device group."""
 
@@ -174,7 +234,8 @@ class CreateDeviceGroupRequest(BaseModel):
     count: int = Field(ge=1, le=100000)
     group_id: str | None = Field(None, alias="groupId")
     id_pattern: str = Field("device-{index}", alias="idPattern")
-    stagger_ms: int = Field(0, alias="staggerMs")
+    stagger_ms: int = Field(0, alias="staggerMs")  # Deprecated, use launch_config
+    launch_config: LaunchConfig | None = Field(None, alias="launchConfig")
 
 
 class DeviceGroupResponse(BaseModel):

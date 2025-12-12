@@ -20,7 +20,10 @@ from .models import (
     DeviceMetrics,
     DeviceModelConfig,
     DeviceStatus,
+    DropoutConfig,
+    DropoutResponse,
     HealthResponse,
+    LaunchConfig,
     PaginatedResponse,
 )
 
@@ -247,10 +250,21 @@ async def create_device_group(request: CreateDeviceGroupRequest) -> DeviceGroupR
 async def start_group(
     group_id: str,
     stagger_ms: int = Query(0, alias="staggerMs"),
+    launch_config: LaunchConfig | None = None,
 ) -> DeviceGroupResponse:
-    """Start all devices in a group."""
+    """Start all devices in a group.
+
+    Supports multiple launch strategies via launch_config:
+    - immediate: Start all devices at once (default)
+    - linear: Fixed delay between each device
+    - batch: Start devices in batches with delay between batches
+    - exponential: Exponentially increasing delay between devices
+
+    For backward compatibility, staggerMs query param is still supported
+    and maps to the 'linear' strategy.
+    """
     try:
-        started = await device_manager.start_group(group_id, stagger_ms)
+        started = await device_manager.start_group(group_id, stagger_ms, launch_config)
         devices, _ = device_manager.list_devices(group_id=group_id)
         return DeviceGroupResponse(
             group_id=group_id,
@@ -287,6 +301,40 @@ async def delete_group(group_id: str) -> None:
     """Delete a device group and all its devices."""
     try:
         await device_manager.delete_group(group_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@app.post("/api/v1/groups/{group_id}/dropout", tags=["Groups"])
+async def simulate_group_dropout(
+    group_id: str,
+    config: DropoutConfig,
+) -> DropoutResponse:
+    """Simulate device dropouts/failures in a group.
+
+    Supports multiple dropout strategies:
+    - immediate: All specified devices drop at once
+    - linear: Fixed delay between each dropout
+    - exponential: Exponentially increasing dropout rate
+    - random: Random dropouts within a time window
+
+    You can specify either 'count' (absolute number) or 'percentage'
+    of devices to drop. If both are provided, 'count' takes precedence.
+
+    Set 'reconnect: true' to have devices automatically reconnect
+    after the specified reconnect_delay_ms.
+    """
+    try:
+        devices_affected, estimated_duration = await device_manager.simulate_dropouts(
+            group_id, config
+        )
+        return DropoutResponse(
+            group_id=group_id,
+            devices_affected=devices_affected,
+            dropout_strategy=config.strategy.value,
+            status="dropout_initiated",
+            estimated_duration_ms=estimated_duration,
+        )
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
 

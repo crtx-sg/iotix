@@ -10,10 +10,16 @@ from uuid import uuid4
 
 from .config import settings
 from .device import VirtualDevice
+import random
+
 from .models import (
     ConnectionConfig,
     DeviceModelConfig,
     DeviceStatus,
+    DropoutConfig,
+    DropoutStrategy,
+    LaunchConfig,
+    LaunchStrategy,
 )
 
 logger = logging.getLogger(__name__)
@@ -195,27 +201,108 @@ class DeviceManager:
 
         logger.info(f"Deleted device: {device_id}")
 
-    async def start_group(self, group_id: str, stagger_ms: int = 0) -> int:
-        """Start all devices in a group."""
+    async def start_group(
+        self,
+        group_id: str,
+        stagger_ms: int = 0,
+        launch_config: LaunchConfig | None = None,
+    ) -> int:
+        """Start all devices in a group with configurable launch strategy.
+
+        Launch strategies:
+        - IMMEDIATE: Start all devices at once (default)
+        - LINEAR: Fixed delay between each device
+        - BATCH: Start devices in batches with delay between batches
+        - EXPONENTIAL: Exponentially increasing delay between devices
+        """
         if group_id not in self._groups:
             raise ValueError(f"Group not found: {group_id}")
 
         started = 0
         device_ids = list(self._groups[group_id])
+        total_devices = len(device_ids)
 
-        for device_id in device_ids:
-            device = self._devices.get(device_id)
-            if device and device.status != DeviceStatus.RUNNING:
-                try:
-                    await device.start()
-                    started += 1
-                except Exception as e:
-                    logger.error(f"Failed to start device {device_id}: {e}")
+        # Use launch_config if provided, otherwise fall back to stagger_ms
+        if launch_config is None:
+            if stagger_ms > 0:
+                launch_config = LaunchConfig(
+                    strategy=LaunchStrategy.LINEAR, delay_ms=stagger_ms
+                )
+            else:
+                launch_config = LaunchConfig(strategy=LaunchStrategy.IMMEDIATE)
 
-                if stagger_ms > 0:
-                    await asyncio.sleep(stagger_ms / 1000.0)
+        logger.info(
+            f"Starting group {group_id} with {total_devices} devices "
+            f"using {launch_config.strategy.value} strategy"
+        )
 
+        if launch_config.strategy == LaunchStrategy.IMMEDIATE:
+            # Start all devices concurrently
+            tasks = []
+            for device_id in device_ids:
+                device = self._devices.get(device_id)
+                if device and device.status != DeviceStatus.RUNNING:
+                    tasks.append(self._start_device_safe(device))
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            started = sum(1 for r in results if r is True)
+
+        elif launch_config.strategy == LaunchStrategy.LINEAR:
+            # Fixed delay between each device
+            for device_id in device_ids:
+                device = self._devices.get(device_id)
+                if device and device.status != DeviceStatus.RUNNING:
+                    if await self._start_device_safe(device):
+                        started += 1
+                    if launch_config.delay_ms > 0:
+                        await asyncio.sleep(launch_config.delay_ms / 1000.0)
+
+        elif launch_config.strategy == LaunchStrategy.BATCH:
+            # Start in batches
+            batch_size = launch_config.batch_size
+            for i in range(0, total_devices, batch_size):
+                batch = device_ids[i : i + batch_size]
+                tasks = []
+                for device_id in batch:
+                    device = self._devices.get(device_id)
+                    if device and device.status != DeviceStatus.RUNNING:
+                        tasks.append(self._start_device_safe(device))
+                if tasks:
+                    results = await asyncio.gather(*tasks, return_exceptions=True)
+                    started += sum(1 for r in results if r is True)
+                    logger.info(
+                        f"Started batch {i // batch_size + 1}, "
+                        f"total started: {started}/{total_devices}"
+                    )
+                if launch_config.delay_ms > 0 and i + batch_size < total_devices:
+                    await asyncio.sleep(launch_config.delay_ms / 1000.0)
+
+        elif launch_config.strategy == LaunchStrategy.EXPONENTIAL:
+            # Exponentially increasing delay
+            base = launch_config.exponent_base
+            for idx, device_id in enumerate(device_ids):
+                device = self._devices.get(device_id)
+                if device and device.status != DeviceStatus.RUNNING:
+                    if await self._start_device_safe(device):
+                        started += 1
+                    # Calculate exponential delay: delay_ms * (base ^ idx)
+                    delay = min(
+                        launch_config.delay_ms * (base**idx),
+                        launch_config.max_delay_ms,
+                    )
+                    if delay > 0 and idx < total_devices - 1:
+                        await asyncio.sleep(delay / 1000.0)
+
+        logger.info(f"Started {started}/{total_devices} devices in group {group_id}")
         return started
+
+    async def _start_device_safe(self, device: VirtualDevice) -> bool:
+        """Safely start a device, catching exceptions."""
+        try:
+            await device.start()
+            return True
+        except Exception as e:
+            logger.error(f"Failed to start device {device.device_id}: {e}")
+            return False
 
     async def stop_group(self, group_id: str) -> int:
         """Stop all devices in a group."""
@@ -262,6 +349,150 @@ class DeviceManager:
             "total_groups": len(self._groups),
             "total_models": len(self._models),
         }
+
+    async def simulate_dropouts(
+        self,
+        group_id: str,
+        config: DropoutConfig,
+    ) -> tuple[int, int]:
+        """Simulate device dropouts/failures in a group.
+
+        Dropout strategies:
+        - IMMEDIATE: Drop all specified devices at once
+        - LINEAR: Fixed delay between each dropout
+        - EXPONENTIAL: Exponentially increasing dropout rate
+        - RANDOM: Random dropouts distributed across a time window
+
+        Returns:
+            Tuple of (devices_dropped, estimated_duration_ms)
+        """
+        if group_id not in self._groups:
+            raise ValueError(f"Group not found: {group_id}")
+
+        device_ids = list(self._groups[group_id])
+        running_devices = [
+            did for did in device_ids
+            if self._devices.get(did) and self._devices[did].status == DeviceStatus.RUNNING
+        ]
+
+        if not running_devices:
+            return 0, 0
+
+        # Determine how many devices to drop
+        if config.count is not None:
+            dropout_count = min(config.count, len(running_devices))
+        elif config.percentage is not None:
+            dropout_count = int(len(running_devices) * config.percentage / 100)
+        else:
+            dropout_count = len(running_devices)
+
+        # Select devices to drop (randomly)
+        devices_to_drop = random.sample(running_devices, dropout_count)
+
+        logger.info(
+            f"Simulating {dropout_count} dropouts in group {group_id} "
+            f"using {config.strategy.value} strategy"
+        )
+
+        dropped = 0
+        estimated_duration = 0
+
+        if config.strategy == DropoutStrategy.IMMEDIATE:
+            # Drop all devices at once
+            tasks = [self._stop_device_safe(self._devices[did]) for did in devices_to_drop]
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            dropped = sum(1 for r in results if r is True)
+            estimated_duration = 0
+
+        elif config.strategy == DropoutStrategy.LINEAR:
+            # Fixed delay between each dropout
+            for idx, device_id in enumerate(devices_to_drop):
+                device = self._devices.get(device_id)
+                if device:
+                    if await self._stop_device_safe(device):
+                        dropped += 1
+                    if config.delay_ms > 0 and idx < len(devices_to_drop) - 1:
+                        await asyncio.sleep(config.delay_ms / 1000.0)
+            estimated_duration = config.delay_ms * (dropout_count - 1)
+
+        elif config.strategy == DropoutStrategy.EXPONENTIAL:
+            # Exponentially increasing dropout rate (decreasing delay)
+            base = config.exponent_base
+            for idx, device_id in enumerate(devices_to_drop):
+                device = self._devices.get(device_id)
+                if device:
+                    if await self._stop_device_safe(device):
+                        dropped += 1
+                    # Delay decreases exponentially (faster dropouts over time)
+                    delay = config.delay_ms / (base ** idx)
+                    delay = max(delay, 1)  # Minimum 1ms delay
+                    estimated_duration += int(delay)
+                    if idx < len(devices_to_drop) - 1:
+                        await asyncio.sleep(delay / 1000.0)
+
+        elif config.strategy == DropoutStrategy.RANDOM:
+            # Random dropouts distributed across duration window
+            if config.duration_ms > 0:
+                # Generate random times within the duration
+                dropout_times = sorted([
+                    random.uniform(0, config.duration_ms / 1000.0)
+                    for _ in range(dropout_count)
+                ])
+                estimated_duration = config.duration_ms
+
+                last_time = 0
+                for idx, dropout_time in enumerate(dropout_times):
+                    # Wait until the scheduled dropout time
+                    wait_time = dropout_time - last_time
+                    if wait_time > 0:
+                        await asyncio.sleep(wait_time)
+                    last_time = dropout_time
+
+                    device = self._devices.get(devices_to_drop[idx])
+                    if device:
+                        if await self._stop_device_safe(device):
+                            dropped += 1
+            else:
+                # No duration specified, drop immediately with small random delays
+                for device_id in devices_to_drop:
+                    device = self._devices.get(device_id)
+                    if device:
+                        if await self._stop_device_safe(device):
+                            dropped += 1
+                        await asyncio.sleep(random.uniform(0, 0.1))
+
+        logger.info(f"Dropped {dropped}/{dropout_count} devices in group {group_id}")
+
+        # Handle reconnection if configured
+        if config.reconnect and dropped > 0:
+            asyncio.create_task(
+                self._reconnect_devices(devices_to_drop[:dropped], config.reconnect_delay_ms)
+            )
+
+        return dropped, estimated_duration
+
+    async def _stop_device_safe(self, device: VirtualDevice) -> bool:
+        """Safely stop a device, catching exceptions."""
+        try:
+            await device.stop()
+            return True
+        except Exception as e:
+            logger.error(f"Failed to stop device {device.device_id}: {e}")
+            return False
+
+    async def _reconnect_devices(self, device_ids: list[str], delay_ms: int) -> None:
+        """Reconnect devices after a delay."""
+        if delay_ms > 0:
+            await asyncio.sleep(delay_ms / 1000.0)
+
+        logger.info(f"Reconnecting {len(device_ids)} devices...")
+        for device_id in device_ids:
+            device = self._devices.get(device_id)
+            if device and device.status != DeviceStatus.RUNNING:
+                try:
+                    await device.start()
+                except Exception as e:
+                    logger.error(f"Failed to reconnect device {device_id}: {e}")
 
     async def shutdown(self) -> None:
         """Shutdown the device manager."""
