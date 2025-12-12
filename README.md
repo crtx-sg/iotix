@@ -600,6 +600,9 @@ curl http://localhost:8082/api/v1/users \
 | `MQTT_BROKER_PORT` | `1883` | MQTT broker port |
 | `KAFKA_BOOTSTRAP_SERVERS` | `localhost:9092` | Kafka bootstrap servers |
 | `INFLUXDB_URL` | `http://localhost:8086` | InfluxDB URL |
+| `INFLUXDB_TOKEN` | `` | InfluxDB API token |
+| `INFLUXDB_ORG` | `iotix` | InfluxDB organization |
+| `INFLUXDB_BUCKET` | `telemetry` | InfluxDB bucket name |
 | `LOG_LEVEL` | `INFO` | Logging level |
 
 #### Test Engine
@@ -608,6 +611,9 @@ curl http://localhost:8082/api/v1/users \
 |----------|---------|-------------|
 | `DEVICE_ENGINE_URL` | `http://localhost:8080` | Device Engine URL |
 | `INFLUXDB_URL` | `http://localhost:8086` | InfluxDB URL |
+| `INFLUXDB_TOKEN` | `` | InfluxDB API token |
+| `INFLUXDB_ORG` | `iotix` | InfluxDB organization |
+| `INFLUXDB_BUCKET` | `telemetry` | InfluxDB bucket name |
 
 #### Management API
 
@@ -616,6 +622,37 @@ curl http://localhost:8082/api/v1/users \
 | `DEVICE_ENGINE_URL` | `http://localhost:8080` | Device Engine URL |
 | `TEST_ENGINE_URL` | `http://localhost:8081` | Test Engine URL |
 | `JWT_SECRET` | `change-me-in-production` | JWT signing secret |
+
+### Default Credentials (Development)
+
+#### InfluxDB
+
+| Setting | Value |
+|---------|-------|
+| URL | http://localhost:8086 |
+| Username | `admin` |
+| Password | `adminpassword` |
+| Organization | `iotix` |
+| Bucket | `telemetry` |
+| API Token | `iotix-dev-token` |
+
+#### Grafana
+
+| Setting | Value |
+|---------|-------|
+| URL | http://localhost:3000 |
+| Username | `admin` |
+| Password | `admin` |
+
+#### Management API
+
+| Setting | Value |
+|---------|-------|
+| URL | http://localhost:8082 |
+| Email | `admin@iotix.local` |
+| Password | `admin` |
+
+> **Warning**: These are development credentials. For production deployments, change all passwords and tokens, and store them securely using Kubernetes Secrets, HashiCorp Vault, or your cloud provider's secrets manager.
 
 ---
 
