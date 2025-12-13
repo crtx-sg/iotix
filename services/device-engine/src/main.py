@@ -11,6 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from . import __version__
 from .config import settings
 from .manager import device_manager
+from .metrics import init_metrics, close_metrics
 from .models import (
     ConnectionConfig,
     CreateDeviceGroupRequest,
@@ -43,6 +44,7 @@ async def lifespan(app: FastAPI):
     """Application lifespan handler."""
     # Startup
     logger.info("Starting Device Engine...")
+    await init_metrics()
     await device_manager.initialize()
     logger.info("Device Engine started")
 
@@ -51,6 +53,7 @@ async def lifespan(app: FastAPI):
     # Shutdown
     logger.info("Shutting down Device Engine...")
     await device_manager.shutdown()
+    await close_metrics()
     logger.info("Device Engine shutdown complete")
 
 

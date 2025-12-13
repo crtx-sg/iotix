@@ -8,7 +8,7 @@ from typing import Any
 from influxdb_client import InfluxDBClient, Point
 from influxdb_client.client.write_api import ASYNCHRONOUS
 
-from .config import get_settings
+from .config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -17,7 +17,7 @@ class MetricsWriter:
     """Writes device metrics to InfluxDB."""
 
     def __init__(self):
-        self.settings = get_settings()
+        self.settings = settings
         self._client: InfluxDBClient | None = None
         self._write_api = None
         self._enabled = bool(self.settings.influxdb_url and self.settings.influxdb_token)

@@ -1,0 +1,4 @@
+# Ensure Grafana config files have correct permissions
+provisioning/**/*.yml text eol=lf
+provisioning/**/*.yaml text eol=lf
+provisioning/**/*.json text eol=lf

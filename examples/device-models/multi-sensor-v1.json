@@ -1,0 +1,61 @@
+{
+  "id": "multi-sensor-v1",
+  "name": "Multi-Parameter Environmental Sensor",
+  "description": "Environmental sensor with temperature, humidity, and pressure",
+  "version": "1.0.0",
+  "type": "sensor",
+  "protocol": "mqtt",
+  "connection": {
+    "broker": "mqtt-broker",
+    "port": 1883,
+    "topicPattern": "sensors/{deviceId}/telemetry",
+    "qos": 1,
+    "keepAlive": 60
+  },
+  "telemetry": [
+    {
+      "name": "temperature",
+      "type": "number",
+      "unit": "celsius",
+      "intervalMs": 5000,
+      "generator": {
+        "type": "random",
+        "min": 15.0,
+        "max": 35.0,
+        "distribution": "normal",
+        "mean": 22.0,
+        "stddev": 3.0
+      }
+    },
+    {
+      "name": "humidity",
+      "type": "number",
+      "unit": "percent",
+      "intervalMs": 5000,
+      "generator": {
+        "type": "random",
+        "min": 30.0,
+        "max": 80.0,
+        "distribution": "uniform"
+      }
+    },
+    {
+      "name": "pressure",
+      "type": "number",
+      "unit": "hPa",
+      "intervalMs": 10000,
+      "generator": {
+        "type": "random",
+        "min": 980.0,
+        "max": 1040.0,
+        "distribution": "normal",
+        "mean": 1013.25,
+        "stddev": 10.0
+      }
+    }
+  ],
+  "metadata": {
+    "manufacturer": "IoTix",
+    "category": "environmental"
+  }
+}

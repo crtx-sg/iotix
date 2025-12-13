@@ -10,6 +10,7 @@ from uuid import uuid4
 
 from .config import settings
 from .device import VirtualDevice
+from .metrics import get_metrics_writer
 import random
 
 from .models import (
@@ -33,11 +34,35 @@ class DeviceManager:
         self._devices: dict[str, VirtualDevice] = {}
         self._groups: dict[str, set[str]] = {}  # group_id -> device_ids
         self._lock = asyncio.Lock()
+        self._stats_task: asyncio.Task | None = None
+        self._running = False
 
     async def initialize(self) -> None:
         """Initialize the device manager."""
         await self._load_models_from_directory(settings.device_model_path)
+        self._running = True
+        self._stats_task = asyncio.create_task(self._stats_writer_loop())
         logger.info(f"Device manager initialized with {len(self._models)} models")
+
+    async def _stats_writer_loop(self) -> None:
+        """Periodically write engine stats to InfluxDB."""
+        while self._running:
+            try:
+                stats = self.get_stats()
+                total_messages = sum(d.messages_sent for d in self._devices.values())
+                total_bytes = sum(d.bytes_sent for d in self._devices.values())
+
+                metrics_writer = get_metrics_writer()
+                metrics_writer.write_engine_stats(
+                    active_devices=stats["running_devices"],
+                    total_messages=total_messages,
+                    total_bytes=total_bytes,
+                    active_groups=len([g for g in self._groups.values() if g]),
+                )
+            except Exception as e:
+                logger.warning(f"Failed to write engine stats: {e}")
+
+            await asyncio.sleep(5)  # Write stats every 5 seconds
 
     async def _load_models_from_directory(self, path: str) -> None:
         """Load device models from a directory."""
@@ -56,10 +81,31 @@ class DeviceManager:
             except Exception as e:
                 logger.error(f"Failed to load device model from {file_path}: {e}")
 
-    def register_model(self, model: DeviceModelConfig) -> None:
-        """Register a device model."""
+    def register_model(self, model: DeviceModelConfig, persist: bool = True) -> None:
+        """Register a device model.
+
+        Args:
+            model: The device model configuration
+            persist: If True, save the model to disk for persistence across restarts
+        """
         self._models[model.id] = model
         logger.info(f"Registered device model: {model.id}")
+
+        if persist:
+            self._save_model_to_disk(model)
+
+    def _save_model_to_disk(self, model: DeviceModelConfig) -> None:
+        """Save a device model to disk for persistence."""
+        model_path = Path(settings.device_model_path)
+        model_path.mkdir(parents=True, exist_ok=True)
+
+        file_path = model_path / f"{model.id}.json"
+        try:
+            with open(file_path, "w") as f:
+                json.dump(model.model_dump(by_alias=True), f, indent=2)
+            logger.info(f"Saved device model to disk: {file_path}")
+        except Exception as e:
+            logger.error(f"Failed to save device model to disk: {e}")
 
     def get_model(self, model_id: str) -> DeviceModelConfig | None:
         """Get a device model by ID."""
@@ -104,6 +150,15 @@ class DeviceManager:
                 if group_id not in self._groups:
                     self._groups[group_id] = set()
                 self._groups[group_id].add(device_id)
+
+        # Write device created event
+        metrics_writer = get_metrics_writer()
+        metrics_writer.write_device_event(
+            device_id=device_id,
+            event_type="created",
+            model_id=model_id,
+            group_id=group_id,
+        )
 
         logger.info(f"Created device: {device_id}")
         return device
@@ -188,16 +243,28 @@ class DeviceManager:
             if not device:
                 raise ValueError(f"Device not found: {device_id}")
 
+            model_id = device.model.id
+            group_id = device.group_id
+
             if device.status == DeviceStatus.RUNNING:
                 await device.stop()
 
             del self._devices[device_id]
 
             # Remove from group
-            if device.group_id and device.group_id in self._groups:
-                self._groups[device.group_id].discard(device_id)
-                if not self._groups[device.group_id]:
-                    del self._groups[device.group_id]
+            if group_id and group_id in self._groups:
+                self._groups[group_id].discard(device_id)
+                if not self._groups[group_id]:
+                    del self._groups[group_id]
+
+        # Write device deleted event
+        metrics_writer = get_metrics_writer()
+        metrics_writer.write_device_event(
+            device_id=device_id,
+            event_type="deleted",
+            model_id=model_id,
+            group_id=group_id,
+        )
 
         logger.info(f"Deleted device: {device_id}")
 
@@ -497,6 +564,15 @@ class DeviceManager:
     async def shutdown(self) -> None:
         """Shutdown the device manager."""
         logger.info("Shutting down device manager...")
+
+        # Stop stats writer
+        self._running = False
+        if self._stats_task:
+            self._stats_task.cancel()
+            try:
+                await self._stats_task
+            except asyncio.CancelledError:
+                pass
 
         # Stop all running devices
         for device in self._devices.values():

@@ -174,6 +174,27 @@ The platform targets QA teams, developers, and DevOps engineers who need to test
 - TimescaleDB: PostgreSQL-based, heavier setup
 - ClickHouse: More complex for pure time-series use case
 
+### D7: Device Launch Strategies
+
+**Decision**: Support multiple launch strategies for device groups (immediate, linear, batch, exponential).
+
+**Rationale**:
+- Different testing scenarios require different ramp-up patterns
+- Immediate: Maximum throughput for quick tests
+- Linear: Predictable load increase for capacity planning
+- Batch: Balance between speed and resource management
+- Exponential: Stress testing with gradual warm-up
+
+### D8: Device Dropout Simulation
+
+**Decision**: Support chaos engineering via device dropout simulation with multiple strategies.
+
+**Rationale**:
+- Real-world IoT deployments experience device failures
+- Testing backend resilience requires simulating failure patterns
+- Strategies (immediate, linear, exponential, random) cover different failure scenarios
+- Optional reconnection simulates temporary network issues
+
 ## Component Design
 
 ### Device Virtualization Layer
@@ -274,6 +295,53 @@ The platform targets QA teams, developers, and DevOps engineers who need to test
   "required": ["id", "name", "type", "protocol"]
 }
 ```
+
+### Metrics Layer
+
+```
+┌────────────────────────────────────────────────────────────────────────────┐
+│                           Metrics Data Flow                                 │
+├────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  ┌─────────────┐    ┌─────────────┐    ┌─────────────┐    ┌─────────────┐ │
+│  │   Virtual   │───▶│   Metrics   │───▶│  InfluxDB   │───▶│   Grafana   │ │
+│  │   Device    │    │   Writer    │    │  (Flux DB)  │    │  Dashboard  │ │
+│  └─────────────┘    └─────────────┘    └─────────────┘    └─────────────┘ │
+│        │                  ▲                   │                            │
+│        │                  │                   │                            │
+│        ▼                  │                   ▼                            │
+│  ┌─────────────┐    ┌─────────────┐    ┌─────────────┐                    │
+│  │   Device    │───▶│   Engine    │    │  Retention  │                    │
+│  │   Manager   │    │   Stats     │    │   Policies  │                    │
+│  └─────────────┘    └─────────────┘    └─────────────┘                    │
+│                                                                             │
+└────────────────────────────────────────────────────────────────────────────┘
+```
+
+#### InfluxDB Schema
+
+| Measurement      | Tags                                    | Fields                                          |
+|------------------|----------------------------------------|------------------------------------------------|
+| telemetry        | device_id, model_id, group_id          | Dynamic fields from device telemetry payload    |
+| engine_stats     | (none)                                 | active_devices, total_messages, total_bytes, active_groups |
+| device_events    | device_id, model_id, event_type, group_id | value, metadata fields                         |
+| connections      | device_id, protocol                    | connected (bool), latency_ms                   |
+
+#### Data Flow
+
+1. **Telemetry Collection**: Each VirtualDevice writes telemetry to InfluxDB after successful MQTT publish
+2. **Engine Stats**: DeviceManager runs background task writing aggregate stats every 5 seconds
+3. **Event Tracking**: Device lifecycle events (created, started, stopped, deleted) logged
+4. **Connection Metrics**: Protocol adapters report connection status and latency
+
+#### Data Retention
+
+- Default: Infinite retention (bucket autogen policy)
+- Configurable via InfluxDB retention policies
+- Recommended production settings:
+  - Raw telemetry: 7-30 days
+  - Downsampled aggregates: 1 year
+  - Engine stats: 90 days
 
 ## Risks / Trade-offs
 

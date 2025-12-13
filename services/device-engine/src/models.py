@@ -241,11 +241,11 @@ class CreateDeviceGroupRequest(BaseModel):
 class DeviceGroupResponse(BaseModel):
     """Response for device group operations."""
 
-    group_id: str = Field(alias="groupId")
-    device_count: int = Field(alias="deviceCount")
-    devices_created: int = Field(alias="devicesCreated")
-    devices_started: int = Field(alias="devicesStarted")
-    devices_stopped: int = Field(alias="devicesStopped")
+    group_id: str = Field(serialization_alias="groupId")
+    device_count: int = Field(serialization_alias="deviceCount")
+    devices_created: int = Field(serialization_alias="devicesCreated")
+    devices_started: int = Field(serialization_alias="devicesStarted")
+    devices_stopped: int = Field(serialization_alias="devicesStopped")
     status: str
 
 

@@ -10,13 +10,16 @@ services:
       - MQTT_BROKER_PORT=1883
       - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
       - INFLUXDB_URL=http://influxdb:8086
+      - INFLUXDB_TOKEN=iotix-dev-token
+      - INFLUXDB_ORG=iotix
+      - INFLUXDB_BUCKET=telemetry
       - LOG_LEVEL=INFO
     depends_on:
       - mqtt-broker
       - kafka
       - influxdb
     volumes:
-      - ./config/device-models:/app/device-models:ro
+      - device-models-data:/app/device-models
 
   test-engine:
     build:
@@ -91,6 +94,7 @@ services:
     image: grafana/grafana:10.2.0
     ports:
       - "3000:3000"
+    user: "0"  # Run as root to avoid permission issues with mounted volumes
     environment:
       - GF_SECURITY_ADMIN_USER=admin
       - GF_SECURITY_ADMIN_PASSWORD=admin
@@ -107,3 +111,4 @@ volumes:
   kafka-data:
   influxdb-data:
   grafana-data:
+  device-models-data:

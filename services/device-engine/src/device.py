@@ -12,6 +12,7 @@ from .adapters.base import ProtocolAdapter
 from .adapters.mqtt import MqttAdapter
 from .adapters.http import HttpAdapter
 from .generators import create_generator, ValueGenerator
+from .metrics import get_metrics_writer
 from .models import (
     ConnectionConfig,
     DeviceModelConfig,
@@ -154,13 +155,26 @@ class VirtualDevice:
 
         self.status = DeviceStatus.STARTING
         self.error_message = None
+        metrics_writer = get_metrics_writer()
 
         try:
             # Create and connect adapter
             self._adapter = self._create_adapter()
             self.connection_state = ConnectionState.CONNECTING
+
+            connect_start = datetime.now(timezone.utc)
             await self._adapter.connect()
+            connect_latency = (datetime.now(timezone.utc) - connect_start).total_seconds() * 1000
+
             self.connection_state = ConnectionState.CONNECTED
+
+            # Write connection metric
+            metrics_writer.write_connection_metric(
+                device_id=self.device_id,
+                protocol=self.model.protocol.value,
+                connected=True,
+                latency_ms=connect_latency,
+            )
 
             # Start telemetry generation
             self._running = True
@@ -168,6 +182,15 @@ class VirtualDevice:
             self._start_telemetry_tasks()
 
             self.status = DeviceStatus.RUNNING
+
+            # Write device started event
+            metrics_writer.write_device_event(
+                device_id=self.device_id,
+                event_type="started",
+                model_id=self.model.id,
+                group_id=self.group_id,
+            )
+
             logger.info(f"Device {self.device_id} started")
 
         except Exception as e:
@@ -175,6 +198,14 @@ class VirtualDevice:
             self.connection_state = ConnectionState.DISCONNECTED
             self.error_message = str(e)
             self.error_count += 1
+
+            # Write connection failure metric
+            metrics_writer.write_connection_metric(
+                device_id=self.device_id,
+                protocol=self.model.protocol.value,
+                connected=False,
+            )
+
             logger.error(f"Failed to start device {self.device_id}: {e}")
             raise
 
@@ -185,6 +216,7 @@ class VirtualDevice:
 
         self.status = DeviceStatus.STOPPING
         self._running = False
+        metrics_writer = get_metrics_writer()
 
         # Cancel telemetry tasks
         for task in self._telemetry_tasks:
@@ -205,6 +237,22 @@ class VirtualDevice:
 
         self.connection_state = ConnectionState.DISCONNECTED
         self.status = DeviceStatus.STOPPED
+
+        # Write connection metric (disconnected)
+        metrics_writer.write_connection_metric(
+            device_id=self.device_id,
+            protocol=self.model.protocol.value,
+            connected=False,
+        )
+
+        # Write device stopped event
+        metrics_writer.write_device_event(
+            device_id=self.device_id,
+            event_type="stopped",
+            model_id=self.model.id,
+            group_id=self.group_id,
+        )
+
         logger.info(f"Device {self.device_id} stopped")
 
     def _start_telemetry_tasks(self) -> None:
@@ -244,6 +292,15 @@ class VirtualDevice:
                     self.messages_sent += 1
                     self.bytes_sent += len(json.dumps(payload))
                     self.last_telemetry_at = datetime.now(timezone.utc)
+
+                    # Write to InfluxDB
+                    metrics_writer = get_metrics_writer()
+                    metrics_writer.write_telemetry(
+                        device_id=self.device_id,
+                        model_id=self.model.id,
+                        data=payload,
+                        group_id=self.group_id,
+                    )
 
                 await asyncio.sleep(interval_seconds)
 

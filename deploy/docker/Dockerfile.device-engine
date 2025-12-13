@@ -15,9 +15,22 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY packages/device-schema /app/packages/device-schema
 COPY services/device-engine/src /app/src
 
+# Copy example device models (will be copied to volume on first run)
+COPY examples/device-models /app/default-device-models
+
 # Set Python path
 ENV PYTHONPATH=/app:/app/packages/device-schema/src
+ENV DEVICE_MODEL_PATH=/app/device-models
+
+# Startup script to initialize device models if volume is empty
+RUN echo '#!/bin/bash\n\
+if [ -z "$(ls -A /app/device-models 2>/dev/null)" ]; then\n\
+  echo "Initializing device models from defaults..."\n\
+  cp /app/default-device-models/*.json /app/device-models/ 2>/dev/null || true\n\
+fi\n\
+exec python -m uvicorn src.main:app --host 0.0.0.0 --port 8080\n\
+' > /app/entrypoint.sh && chmod +x /app/entrypoint.sh
 
 EXPOSE 8080
 
-CMD ["python", "-m", "uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8080"]
+CMD ["/app/entrypoint.sh"]

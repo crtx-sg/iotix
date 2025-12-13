@@ -5,10 +5,26 @@
 ### Requirement: InfluxDB Metrics Storage
 The system SHALL store time-series metrics in InfluxDB.
 
-#### Scenario: Write device metrics
+#### Scenario: Write device telemetry metrics
 - **WHEN** a device generates telemetry
-- **THEN** metrics are written to InfluxDB
-- **AND** tagged with device ID, group, and type
+- **THEN** metrics are written to InfluxDB "telemetry" measurement
+- **AND** tagged with device_id, model_id, and group_id
+- **AND** dynamic fields are extracted from the telemetry payload
+
+#### Scenario: Write engine statistics
+- **WHEN** the device engine is running
+- **THEN** aggregate stats are written to InfluxDB "engine_stats" measurement every 5 seconds
+- **AND** includes active_devices, total_messages, total_bytes, and active_groups fields
+
+#### Scenario: Write device lifecycle events
+- **WHEN** a device lifecycle event occurs (created, started, stopped, deleted)
+- **THEN** the event is written to InfluxDB "device_events" measurement
+- **AND** tagged with device_id, model_id, event_type, and group_id
+
+#### Scenario: Write connection metrics
+- **WHEN** a device connects or disconnects from a broker
+- **THEN** the connection state is written to InfluxDB "connections" measurement
+- **AND** includes protocol, connected status, and optional latency_ms
 
 #### Scenario: Write test metrics
 - **WHEN** a test executes

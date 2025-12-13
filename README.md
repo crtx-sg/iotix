@@ -183,6 +183,9 @@ docker compose -f deploy/docker/docker-compose.yml down
 ### Verify Installation
 
 ```bash
+# Check all services are running
+docker compose ps
+
 # Check service health
 curl http://localhost:8080/health
 curl http://localhost:8081/health
@@ -195,6 +198,376 @@ curl http://localhost:8080/api/v1/models
 # Device Engine: http://localhost:8080/docs
 # Test Engine:   http://localhost:8081/docs
 # Management:    http://localhost:8082/docs
+```
+
+### Troubleshooting
+
+**Grafana not starting (permission denied)**
+
+If Grafana fails to start with permission errors on provisioning files, the docker-compose is configured to run Grafana as root (`user: "0"`) to avoid these issues. If you still encounter problems:
+
+```bash
+# Fix permissions manually
+chmod -R 755 deploy/docker/config/grafana/provisioning
+chmod 644 deploy/docker/config/grafana/provisioning/**/*.yml
+chmod 644 deploy/docker/config/grafana/provisioning/**/*.json
+
+# Restart Grafana
+docker compose restart grafana
+```
+
+**"Unknown device model" error when creating devices**
+
+Device models must be registered before creating device instances. Either:
+1. Models are auto-loaded from the `device-models` volume on startup
+2. Register models manually via the API:
+
+```bash
+# Check existing models
+curl http://localhost:8080/api/v1/models
+
+# Register a model if none exist
+curl -X POST http://localhost:8080/api/v1/models \
+  -H "Content-Type: application/json" \
+  -d '{
+    "id": "temperature-sensor-v1",
+    "name": "Temperature Sensor",
+    "type": "sensor",
+    "protocol": "mqtt",
+    "connection": {
+      "broker": "mqtt-broker",
+      "port": 1883,
+      "topicPattern": "sensors/{deviceId}/temperature"
+    },
+    "telemetry": [{
+      "name": "temperature",
+      "type": "number",
+      "unit": "celsius",
+      "intervalMs": 5000,
+      "generator": {
+        "type": "random",
+        "min": 18.0,
+        "max": 28.0
+      }
+    }]
+  }'
+```
+
+Models registered via API are automatically persisted to disk and will survive container restarts.
+
+**Pydantic validation errors on API responses**
+
+If you see validation errors like "Field required" with snake_case field names, ensure you've rebuilt the Docker image after code changes:
+
+```bash
+cd deploy/docker
+docker compose down
+docker compose build device-engine
+docker compose up -d
+```
+
+**InfluxDB metrics not appearing in Grafana**
+
+Ensure the device-engine has the correct InfluxDB credentials. Check the environment variables:
+
+```bash
+docker compose exec device-engine env | grep INFLUX
+```
+
+Should show:
+```
+INFLUXDB_URL=http://influxdb:8086
+INFLUXDB_TOKEN=iotix-dev-token
+INFLUXDB_ORG=iotix
+INFLUXDB_BUCKET=telemetry
+```
+
+If missing, the docker-compose.yml should include these environment variables for the device-engine service.
+
+**Kafka not starting (invalid cluster ID)**
+
+If Kafka fails with cluster ID errors, remove the Kafka data volume and restart:
+
+```bash
+docker compose down
+docker volume rm docker_kafka-data
+docker compose up -d
+```
+
+**Code changes not reflected after restart**
+
+Docker caches built images. After making code changes, rebuild the affected service:
+
+```bash
+# Rebuild a specific service
+docker compose build device-engine
+
+# Or rebuild all services
+docker compose build
+
+# Then restart
+docker compose up -d
+```
+
+**Grafana login fails with admin/admin**
+
+If you previously logged in and changed the password (or were prompted to), the password is persisted in the Grafana data volume. To reset:
+
+```bash
+cd deploy/docker
+
+# Stop, remove container and volume, then restart
+docker compose rm -f grafana
+docker volume rm docker_grafana-data
+docker compose up -d grafana
+```
+
+Now login with `admin`/`admin`. You can skip the password change prompt or set a new password.
+
+**MQTT broker connection timeout**
+
+If devices fail to start with "Timeout connecting to MQTT broker", ensure the device model has the correct broker hostname. For Docker deployments, the broker should be `mqtt-broker` (the Docker service name), not `mosquitto` or `localhost`:
+
+```bash
+# Check broker in registered models
+curl -s http://localhost:8080/api/v1/models | jq '.[].connection.broker'
+
+# Should show "mqtt-broker" for all models
+```
+
+If models have incorrect broker, delete the device-models volume and rebuild:
+
+```bash
+docker compose down
+docker volume rm docker_device-models-data
+docker compose build device-engine
+docker compose up -d
+```
+
+---
+
+## Quick Reference Commands
+
+### Device Models
+
+```bash
+# List all registered models
+curl http://localhost:8080/api/v1/models
+
+# Get a specific model
+curl http://localhost:8080/api/v1/models/temperature-sensor-v1
+
+# Register a new model
+curl -X POST http://localhost:8080/api/v1/models \
+  -H "Content-Type: application/json" \
+  -d '{
+    "id": "my-sensor-v1",
+    "name": "My Sensor",
+    "type": "sensor",
+    "protocol": "mqtt",
+    "connection": {
+      "broker": "mqtt-broker",
+      "port": 1883,
+      "topicPattern": "sensors/{deviceId}/data"
+    },
+    "telemetry": [{
+      "name": "value",
+      "type": "number",
+      "intervalMs": 5000,
+      "generator": {"type": "random", "min": 0, "max": 100}
+    }]
+  }'
+```
+
+### Device Groups
+
+```bash
+# Create a device group
+curl -X POST http://localhost:8080/api/v1/groups \
+  -H "Content-Type: application/json" \
+  -d '{
+    "modelId": "temperature-sensor-v1",
+    "count": 10,
+    "groupId": "my-sensors"
+  }'
+
+# Start a device group
+curl -X POST http://localhost:8080/api/v1/groups/my-sensors/start
+
+# Start with launch strategy (linear ramp-up)
+curl -X POST "http://localhost:8080/api/v1/groups/my-sensors/start" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "strategy": "linear",
+    "delayMs": 100
+  }'
+
+# Stop a device group
+curl -X POST http://localhost:8080/api/v1/groups/my-sensors/stop
+
+# Delete a device group
+curl -X DELETE http://localhost:8080/api/v1/groups/my-sensors
+
+# Simulate device dropouts
+curl -X POST http://localhost:8080/api/v1/groups/my-sensors/dropout \
+  -H "Content-Type: application/json" \
+  -d '{
+    "strategy": "linear",
+    "percentage": 20,
+    "delayMs": 1000
+  }'
+```
+
+### Devices
+
+```bash
+# List all devices
+curl http://localhost:8080/api/v1/devices
+
+# List devices in a group
+curl "http://localhost:8080/api/v1/devices?groupId=my-sensors"
+
+# Get device details
+curl http://localhost:8080/api/v1/devices/device-0
+
+# Get device metrics
+curl http://localhost:8080/api/v1/devices/device-0/metrics
+
+# Start/stop individual device
+curl -X POST http://localhost:8080/api/v1/devices/device-0/start
+curl -X POST http://localhost:8080/api/v1/devices/device-0/stop
+```
+
+### Engine Stats
+
+```bash
+# Get engine statistics
+curl http://localhost:8080/api/v1/stats
+
+# Health check
+curl http://localhost:8080/health
+```
+
+### InfluxDB Queries
+
+Access InfluxDB at http://localhost:8086 (admin/adminpassword)
+
+```flux
+// Query telemetry data (last 15 minutes)
+from(bucket: "telemetry")
+  |> range(start: -15m)
+  |> filter(fn: (r) => r._measurement == "telemetry")
+  |> filter(fn: (r) => r._field == "temperature")
+
+// Query by device
+from(bucket: "telemetry")
+  |> range(start: -1h)
+  |> filter(fn: (r) => r._measurement == "telemetry")
+  |> filter(fn: (r) => r.device_id == "device-0")
+
+// Query device events
+from(bucket: "telemetry")
+  |> range(start: -1h)
+  |> filter(fn: (r) => r._measurement == "device_events")
+
+// Query engine stats
+from(bucket: "telemetry")
+  |> range(start: -1h)
+  |> filter(fn: (r) => r._measurement == "engine_stats")
+
+// Aggregate temperature by device (mean per 1 minute)
+from(bucket: "telemetry")
+  |> range(start: -1h)
+  |> filter(fn: (r) => r._measurement == "telemetry")
+  |> filter(fn: (r) => r._field == "temperature")
+  |> aggregateWindow(every: 1m, fn: mean)
+  |> yield(name: "mean_temperature")
+```
+
+### InfluxDB Schema
+
+InfluxDB stores time-series data in the `telemetry` bucket with the following measurements:
+
+| Measurement | Tags | Fields | Description |
+|-------------|------|--------|-------------|
+| `telemetry` | device_id, model_id, group_id | temperature, humidity, pressure, unit | Device telemetry readings |
+| `engine_stats` | (none) | active_devices, total_messages, total_bytes, active_groups | Engine-wide statistics (updated every 5s) |
+| `device_events` | device_id, model_id, event_type, group_id | value | Device lifecycle events (created, started, stopped) |
+| `connections` | device_id, protocol | connected, latency_ms | Connection status and latency |
+
+### InfluxDB Data Retention
+
+| Bucket | Default Retention | Description |
+|--------|-------------------|-------------|
+| `telemetry` | infinite | Device metrics persist forever until manually deleted |
+| `_monitoring` | 7 days | Internal InfluxDB monitoring |
+| `_tasks` | 3 days | Internal task data |
+
+**Data persistence:**
+- Container restart: Data persists (stored in Docker volume)
+- `docker compose down`: Data persists (volume remains)
+- `docker compose down -v`: Data is **deleted** (removes volumes)
+
+**Change retention policy** (e.g., 30 days):
+
+```bash
+# Get bucket ID
+docker compose exec influxdb influx bucket list --org iotix --token iotix-dev-token
+
+# Set 30-day retention (720 hours)
+docker compose exec influxdb influx bucket update \
+  --id <BUCKET_ID> \
+  --retention 720h \
+  --org iotix \
+  --token iotix-dev-token
+```
+
+**Reset all InfluxDB data:**
+
+```bash
+docker compose down
+docker volume rm docker_influxdb-data
+docker compose up -d
+```
+
+### Grafana
+
+Access Grafana at http://localhost:3000 (admin/admin)
+
+**Pre-configured dashboard**: Dashboards > Browse > IoTix Device Telemetry
+
+**Manual data source setup** (if needed):
+1. Go to Configuration > Data Sources > Add data source
+2. Select InfluxDB
+3. Configure:
+   - Query Language: Flux
+   - URL: http://influxdb:8086
+   - Organization: iotix
+   - Token: iotix-dev-token
+   - Default Bucket: telemetry
+
+### Docker Commands
+
+```bash
+# Start all services
+cd deploy/docker
+docker compose up -d
+
+# Check service status
+docker compose ps
+
+# View logs
+docker compose logs -f device-engine
+docker compose logs -f grafana
+
+# Restart a service
+docker compose restart device-engine
+
+# Stop all services
+docker compose down
+
+# Full reset (removes all data)
+docker compose down -v
 ```
 
 ---
