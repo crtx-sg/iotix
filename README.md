@@ -340,7 +340,9 @@ iotix/
 │   │       ├── proxy_device.py     # ProxyDevice (physical)
 │   │       ├── manager.py          # DeviceManager
 │   │       └── adapters/           # Protocol adapters
-│   │           ├── mqtt.py         # Outbound MQTT
+│   │           ├── mqtt.py         # Outbound MQTT adapter
+│   │           ├── coap.py         # Outbound CoAP adapter
+│   │           ├── http.py         # Outbound HTTP adapter
 │   │           ├── mqtt_proxy.py   # Inbound MQTT proxy
 │   │           └── http_proxy.py   # Inbound HTTP webhook
 │   ├── test-engine/         # Test execution
