@@ -1,5 +1,18 @@
 # Design: Hybrid Device Support
 
+## Implementation Status
+
+| Component | Status | Notes |
+|-----------|--------|-------|
+| ProxyDevice class | ✅ Complete | `services/device-engine/src/proxy_device.py` |
+| MqttProxyAdapter | ✅ Complete | `services/device-engine/src/adapters/mqtt_proxy.py` |
+| HttpProxyAdapter | ✅ Complete | `services/device-engine/src/adapters/http_proxy.py` |
+| CoApProxyAdapter | ⏳ Deferred | Not in MVP scope |
+| Source tagging | ✅ Complete | All metrics tagged with `simulated` or `physical` |
+| REST API endpoints | ✅ Complete | bind, unbind, binding status, webhook receiver |
+| Grafana dashboards | ✅ Complete | Source filter, simulated/physical stats, telemetry by source |
+| Documentation | ✅ Complete | README updated with full usage guide |
+
 ## Context
 
 The iotix platform currently focuses on simulated device testing. However, real-world IoT testing scenarios often require validating backend systems with actual hardware prototypes alongside simulated devices.
@@ -189,7 +202,104 @@ class ProxyDevice:
 Additive feature. No migration required.
 
 **Phases**:
-1. Phase 1: ProxyDevice class + MQTT proxy adapter + source tagging
-2. Phase 2: HTTP webhook proxy adapter
-3. Phase 3: CoAP observe proxy adapter
-4. Phase 4: Grafana dashboard updates
+1. Phase 1: ProxyDevice class + MQTT proxy adapter + source tagging ✅
+2. Phase 2: HTTP webhook proxy adapter ✅
+3. Phase 3: CoAP observe proxy adapter ⏳ (deferred)
+4. Phase 4: Grafana dashboard updates ✅
+
+## Files Changed
+
+### New Files
+- `services/device-engine/src/proxy_device.py` - ProxyDevice class implementation
+- `services/device-engine/src/adapters/mqtt_proxy.py` - MQTT proxy adapter
+- `services/device-engine/src/adapters/http_proxy.py` - HTTP webhook proxy adapter
+- `examples/device-models/physical-sensor-proxy.json` - Example proxy device model
+
+### Modified Files
+- `services/device-engine/src/models.py` - Added PROXY type, DeviceSource enum, binding models
+- `services/device-engine/src/metrics.py` - Added source parameter to all write methods
+- `services/device-engine/src/manager.py` - Added bind/unbind methods, proxy device handling
+- `services/device-engine/src/main.py` - Added bind/unbind/webhook API endpoints
+- `deploy/grafana/dashboards/device-overview.json` - Added source filter and new panels
+- `README.md` - Added Hybrid Device Support documentation section
+
+## API Reference
+
+### Bind Device
+```
+POST /api/v1/devices/{device_id}/bind
+Content-Type: application/json
+
+{
+  "config": {
+    "protocol": "http" | "mqtt",
+    "broker": "string (mqtt only)",
+    "port": 1883 (mqtt only),
+    "topic": "string (mqtt only)",
+    "qos": 0-2 (mqtt only),
+    "username": "string (optional)"
+  }
+}
+
+Response:
+{
+  "deviceId": "string",
+  "status": "bound",
+  "binding": { ... },
+  "webhookUrl": "/api/v1/webhooks/{device_id}" (http only)
+}
+```
+
+### Unbind Device
+```
+POST /api/v1/devices/{device_id}/unbind
+
+Response:
+{
+  "deviceId": "string",
+  "status": "unbound",
+  "binding": null,
+  "webhookUrl": null
+}
+```
+
+### Get Binding Status
+```
+GET /api/v1/devices/{device_id}/binding
+
+Response:
+{
+  "bound": true,
+  "protocol": "http",
+  "webhookUrl": "/api/v1/webhooks/{device_id}",
+  "boundAt": "2025-01-15T10:30:00Z"
+}
+```
+
+### Webhook Receiver
+```
+POST /api/v1/webhooks/{device_id}
+Content-Type: application/json
+
+{
+  "temperature": 25.5,
+  "humidity": 60.0,
+  ... (any JSON telemetry)
+}
+
+Response:
+{
+  "status": "accepted",
+  "deviceId": "string"
+}
+```
+
+## Testing
+
+See README.md section "Testing Hybrid Device Support" for step-by-step instructions to:
+1. Rebuild and restart services
+2. Create simulated device group
+3. Create and bind proxy device
+4. Send test telemetry via webhook
+5. Verify in Grafana dashboards
+6. Cleanup test resources

@@ -1,0 +1,14 @@
+{
+  "id": "physical-sensor-proxy",
+  "name": "Physical Sensor Proxy",
+  "description": "Proxy device for forwarding telemetry from physical sensors",
+  "version": "1.0.0",
+  "type": "proxy",
+  "protocol": "http",
+  "telemetry": [],
+  "metadata": {
+    "manufacturer": "External",
+    "category": "proxy",
+    "description": "This model acts as a passthrough for external physical device telemetry"
+  }
+}

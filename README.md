@@ -1241,6 +1241,375 @@ curl -X POST http://localhost:8080/api/v1/groups/field-devices/dropout \
 
 ---
 
+## Hybrid Device Support (Physical Devices)
+
+IoTix supports integrating real physical IoT devices alongside simulated devices. This allows you to:
+
+- **Mix simulated and physical devices** in the same device groups
+- **Forward telemetry from external sources** (MQTT brokers, HTTP webhooks) to InfluxDB
+- **Compare simulated vs physical device behavior** side-by-side in Grafana
+- **Test IoT backends** with a blend of predictable simulated data and real-world physical data
+
+### How Proxy Devices Work
+
+Proxy devices act as passthrough adapters that:
+
+1. **Subscribe to external telemetry sources** (external MQTT topics or HTTP webhooks)
+2. **Forward received data to InfluxDB** with `source=physical` tag
+3. **Appear in dashboards** alongside simulated devices
+
+### Creating a Proxy Device
+
+First, register a proxy device model:
+
+```bash
+# Register a proxy device model
+curl -X POST http://localhost:8080/api/v1/models \
+  -H "Content-Type: application/json" \
+  -d '{
+    "id": "physical-sensor-proxy",
+    "name": "Physical Sensor Proxy",
+    "type": "proxy",
+    "protocol": "http",
+    "telemetry": [],
+    "metadata": {"category": "proxy"}
+  }'
+```
+
+Then create a device instance:
+
+```bash
+# Create a proxy device
+curl -X POST http://localhost:8080/api/v1/devices \
+  -H "Content-Type: application/json" \
+  -d '{
+    "modelId": "physical-sensor-proxy",
+    "deviceId": "my-physical-sensor-1"
+  }'
+```
+
+### Binding to External Sources
+
+#### HTTP Webhook Binding
+
+Bind a proxy device to receive telemetry via HTTP POST:
+
+```bash
+# Bind to HTTP webhook
+curl -X POST http://localhost:8080/api/v1/devices/my-physical-sensor-1/bind \
+  -H "Content-Type: application/json" \
+  -d '{
+    "config": {
+      "protocol": "http"
+    }
+  }'
+
+# Response includes the webhook URL
+# {
+#   "deviceId": "my-physical-sensor-1",
+#   "status": "bound",
+#   "webhookUrl": "/api/v1/webhooks/my-physical-sensor-1"
+# }
+```
+
+External devices can then POST telemetry to the webhook:
+
+```bash
+# Send telemetry from external device
+curl -X POST http://localhost:8080/api/v1/webhooks/my-physical-sensor-1 \
+  -H "Content-Type: application/json" \
+  -d '{
+    "temperature": 23.5,
+    "humidity": 45.2,
+    "batteryLevel": 87
+  }'
+```
+
+#### MQTT Binding
+
+Bind a proxy device to subscribe to an external MQTT topic:
+
+```bash
+# Bind to external MQTT broker
+curl -X POST http://localhost:8080/api/v1/devices/my-physical-sensor-1/bind \
+  -H "Content-Type: application/json" \
+  -d '{
+    "config": {
+      "protocol": "mqtt",
+      "broker": "external-broker.example.com",
+      "port": 1883,
+      "topic": "devices/physical-001/telemetry",
+      "qos": 1,
+      "username": "iotix-reader"
+    }
+  }'
+```
+
+### Unbinding Devices
+
+```bash
+# Unbind a device from its external source
+curl -X POST http://localhost:8080/api/v1/devices/my-physical-sensor-1/unbind
+```
+
+### Checking Binding Status
+
+```bash
+# Get binding status
+curl http://localhost:8080/api/v1/devices/my-physical-sensor-1/binding
+
+# Response
+# {
+#   "bound": true,
+#   "protocol": "http",
+#   "webhookUrl": "/api/v1/webhooks/my-physical-sensor-1",
+#   "boundAt": "2025-01-15T10:30:00Z"
+# }
+```
+
+### Hybrid Device Groups
+
+You can create groups containing both simulated and proxy devices:
+
+```bash
+# Create simulated devices in a group
+curl -X POST http://localhost:8080/api/v1/groups \
+  -H "Content-Type: application/json" \
+  -d '{
+    "modelId": "temperature-sensor-v1",
+    "count": 10,
+    "groupId": "hybrid-sensors"
+  }'
+
+# Add a proxy device to the same group
+curl -X POST http://localhost:8080/api/v1/devices \
+  -H "Content-Type: application/json" \
+  -d '{
+    "modelId": "physical-sensor-proxy",
+    "deviceId": "physical-sensor-001",
+    "groupId": "hybrid-sensors"
+  }'
+```
+
+**Note:** Proxy devices are automatically excluded from dropout simulations since they represent real physical devices.
+
+### Source Tagging
+
+All metrics are tagged with their source:
+
+| Source | Description |
+|--------|-------------|
+| `simulated` | Data from virtual devices (default) |
+| `physical` | Data from proxy devices (external sources) |
+
+### Grafana Filtering
+
+The Grafana dashboard includes a `source` filter variable. Use it to:
+
+- View **all data** (simulated + physical)
+- View **only simulated** device data
+- View **only physical** device data
+
+Dashboard panels include:
+- **Simulated Devices** - Count of running simulated devices
+- **Physical Devices** - Count of running proxy/physical devices
+- **Telemetry by Source** - Pie chart showing data distribution
+
+### InfluxDB Queries by Source
+
+```flux
+// Query only physical device telemetry
+from(bucket: "telemetry")
+  |> range(start: -1h)
+  |> filter(fn: (r) => r._measurement == "telemetry")
+  |> filter(fn: (r) => r.source == "physical")
+
+// Query only simulated device telemetry
+from(bucket: "telemetry")
+  |> range(start: -1h)
+  |> filter(fn: (r) => r._measurement == "telemetry")
+  |> filter(fn: (r) => r.source == "simulated")
+
+// Compare simulated vs physical temperature readings
+from(bucket: "telemetry")
+  |> range(start: -1h)
+  |> filter(fn: (r) => r._measurement == "telemetry" and r._field == "temperature")
+  |> group(columns: ["source"])
+  |> aggregateWindow(every: 1m, fn: mean)
+```
+
+### Engine Statistics
+
+The `/api/v1/stats` endpoint now includes:
+
+```json
+{
+  "total_devices": 15,
+  "running_devices": 12,
+  "running_simulated": 10,
+  "running_physical": 2,
+  "total_proxy_devices": 3,
+  "total_groups": 2,
+  "total_models": 5
+}
+```
+
+### Testing Hybrid Device Support
+
+Follow these steps to test the hybrid device support after deployment:
+
+#### Step 1: Rebuild and Restart Services
+
+```bash
+cd deploy/docker
+
+# Stop existing services
+docker compose down
+
+# Rebuild the device-engine with new changes
+docker compose build device-engine
+
+# Start all services
+docker compose up -d
+
+# Verify services are running
+docker compose ps
+```
+
+#### Step 2: Verify Services are Ready
+
+```bash
+# Check device-engine health
+curl http://localhost:8080/health
+
+# Check available models
+curl http://localhost:8080/api/v1/models
+```
+
+#### Step 3: Run Simulated Device Test
+
+```bash
+# Create a group of simulated temperature sensors
+curl -X POST http://localhost:8080/api/v1/groups \
+  -H "Content-Type: application/json" \
+  -d '{
+    "modelId": "temperature-sensor-v1",
+    "count": 5,
+    "groupId": "test-sensors"
+  }'
+
+# Start the device group
+curl -X POST http://localhost:8080/api/v1/groups/test-sensors/start
+
+# Check engine stats (should show running_simulated: 5)
+curl http://localhost:8080/api/v1/stats
+```
+
+#### Step 4: Test Proxy Device
+
+```bash
+# Register proxy device model (if not auto-loaded)
+curl -X POST http://localhost:8080/api/v1/models \
+  -H "Content-Type: application/json" \
+  -d '{
+    "id": "physical-sensor-proxy",
+    "name": "Physical Sensor Proxy",
+    "type": "proxy",
+    "protocol": "http",
+    "telemetry": [],
+    "metadata": {"category": "proxy"}
+  }'
+
+# Create a proxy device
+curl -X POST http://localhost:8080/api/v1/devices \
+  -H "Content-Type: application/json" \
+  -d '{
+    "modelId": "physical-sensor-proxy",
+    "deviceId": "physical-test-1"
+  }'
+
+# Bind to HTTP webhook
+curl -X POST http://localhost:8080/api/v1/devices/physical-test-1/bind \
+  -H "Content-Type: application/json" \
+  -d '{"config": {"protocol": "http"}}'
+
+# Send test telemetry via webhook
+curl -X POST http://localhost:8080/api/v1/webhooks/physical-test-1 \
+  -H "Content-Type: application/json" \
+  -d '{"temperature": 25.5, "humidity": 60}'
+
+# Check stats (should show running_physical: 1)
+curl http://localhost:8080/api/v1/stats
+```
+
+#### Step 5: View in Grafana
+
+1. Open http://localhost:3000 (admin/admin)
+2. Go to Dashboards → IoTix Device Overview
+3. You should see:
+   - **Simulated Devices**: 5
+   - **Physical Devices**: 1
+   - **Telemetry by Source**: pie chart showing both sources
+   - Temperature and humidity charts with data from both sources
+
+#### Step 6: View Logs
+
+```bash
+# Watch device-engine logs
+docker compose logs -f device-engine
+```
+
+#### Step 7: Cleanup
+
+```bash
+# Stop and delete the test group
+curl -X POST http://localhost:8080/api/v1/groups/test-sensors/stop
+curl -X DELETE http://localhost:8080/api/v1/groups/test-sensors
+
+# Unbind and delete proxy device
+curl -X POST http://localhost:8080/api/v1/devices/physical-test-1/unbind
+curl -X DELETE http://localhost:8080/api/v1/devices/physical-test-1
+```
+
+### Troubleshooting Physical Device Connectivity
+
+**Webhook not receiving data**
+
+1. Ensure the device is bound:
+   ```bash
+   curl http://localhost:8080/api/v1/devices/{device_id}/binding
+   ```
+
+2. Check the webhook URL is correct (returned in bind response)
+
+3. Verify the POST request includes `Content-Type: application/json` header
+
+**MQTT subscription not working**
+
+1. Check broker connectivity from the device-engine container:
+   ```bash
+   docker compose exec device-engine nc -zv external-broker.example.com 1883
+   ```
+
+2. Verify credentials are correct
+
+3. Check topic format matches what the external device publishes to
+
+**Data not appearing in Grafana**
+
+1. Verify data is in InfluxDB:
+   ```flux
+   from(bucket: "telemetry")
+     |> range(start: -5m)
+     |> filter(fn: (r) => r.source == "physical")
+   ```
+
+2. Check the source filter in Grafana includes "physical"
+
+3. Ensure the dashboard time range covers recent data
+
+---
+
 ## Local Development Setup
 
 For development without Docker:

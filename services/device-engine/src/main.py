@@ -13,6 +13,10 @@ from .config import settings
 from .manager import device_manager
 from .metrics import init_metrics, close_metrics
 from .models import (
+    BindingConfig,
+    BindRequest,
+    BindResponse,
+    BindingStatus,
     ConnectionConfig,
     CreateDeviceGroupRequest,
     CreateDeviceRequest,
@@ -27,6 +31,7 @@ from .models import (
     LaunchConfig,
     PaginatedResponse,
 )
+from .adapters.http_proxy import get_webhook_handler
 
 # Configure logging
 logging.basicConfig(
@@ -349,3 +354,105 @@ async def simulate_group_dropout(
 async def get_stats() -> dict[str, Any]:
     """Get device engine statistics."""
     return device_manager.get_stats()
+
+
+# Proxy device binding endpoints
+
+
+@app.post("/api/v1/devices/{device_id}/bind", tags=["Devices"])
+async def bind_device(device_id: str, request: BindRequest) -> BindResponse:
+    """Bind a proxy device to an external telemetry source.
+
+    Supported protocols:
+    - mqtt: Subscribe to an external MQTT topic
+    - http: Receive telemetry via HTTP webhook POST
+
+    For MQTT, provide: broker, port, topic, and optionally username/passwordRef
+    For HTTP, webhook URL will be returned for external devices to POST to
+    """
+    device = device_manager.get_device(device_id)
+    if not device:
+        raise HTTPException(status_code=404, detail=f"Device not found: {device_id}")
+
+    try:
+        webhook_url = await device_manager.bind_device(device_id, request.config)
+
+        # Get fresh binding status
+        from .proxy_device import ProxyDevice
+
+        if isinstance(device, ProxyDevice):
+            binding_status = device.get_binding_status()
+        else:
+            binding_status = None
+
+        return BindResponse(
+            device_id=device_id,
+            status="bound",
+            binding=binding_status,
+            webhook_url=webhook_url,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except RuntimeError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/v1/devices/{device_id}/unbind", tags=["Devices"])
+async def unbind_device(device_id: str) -> BindResponse:
+    """Unbind a proxy device from its external telemetry source."""
+    device = device_manager.get_device(device_id)
+    if not device:
+        raise HTTPException(status_code=404, detail=f"Device not found: {device_id}")
+
+    try:
+        await device_manager.unbind_device(device_id)
+        return BindResponse(
+            device_id=device_id,
+            status="unbound",
+            binding=None,
+            webhook_url=None,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/api/v1/devices/{device_id}/binding", tags=["Devices"])
+async def get_device_binding(device_id: str) -> BindingStatus:
+    """Get binding status for a proxy device."""
+    device = device_manager.get_device(device_id)
+    if not device:
+        raise HTTPException(status_code=404, detail=f"Device not found: {device_id}")
+
+    from .proxy_device import ProxyDevice
+
+    if not isinstance(device, ProxyDevice):
+        raise HTTPException(
+            status_code=400, detail=f"Device {device_id} is not a proxy device"
+        )
+
+    return device.get_binding_status()
+
+
+# Webhook endpoint for receiving external telemetry
+
+
+@app.post("/api/v1/webhooks/{device_id}", tags=["Webhooks"])
+async def receive_webhook(device_id: str, payload: dict[str, Any]) -> dict[str, str]:
+    """Receive telemetry from external device via webhook.
+
+    This endpoint is called by external physical devices to send telemetry data.
+    The device must be bound via HTTP protocol for this endpoint to accept data.
+    """
+    handler = get_webhook_handler(device_id)
+    if not handler:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No webhook handler registered for device: {device_id}",
+        )
+
+    try:
+        await handler(payload)
+        return {"status": "accepted", "deviceId": device_id}
+    except Exception as e:
+        logger.error(f"Error processing webhook for device {device_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

@@ -14,6 +14,14 @@ class DeviceType(str, Enum):
     GATEWAY = "gateway"
     ACTUATOR = "actuator"
     CUSTOM = "custom"
+    PROXY = "proxy"
+
+
+class DeviceSource(str, Enum):
+    """Device source type for metrics tagging."""
+
+    SIMULATED = "simulated"
+    PHYSICAL = "physical"
 
 
 class Protocol(str, Enum):
@@ -271,3 +279,52 @@ class HealthResponse(BaseModel):
     running_device_count: int = Field(alias="runningDeviceCount")
 
     model_config = {"populate_by_name": True}
+
+
+# Proxy Device Models
+
+
+class BindingConfig(BaseModel):
+    """Configuration for binding a proxy device to an external source."""
+
+    protocol: Protocol
+    broker: str | None = None
+    port: int | None = None
+    topic: str | None = None
+    qos: int = Field(1, ge=0, le=2)
+    username: str | None = None
+    password_ref: str | None = Field(None, alias="passwordRef")
+    webhook_path: str | None = Field(None, alias="webhookPath")
+    resource_uri: str | None = Field(None, alias="resourceUri")
+
+    model_config = {"populate_by_name": True}
+
+
+class BindingStatus(BaseModel):
+    """Status of a proxy device binding."""
+
+    bound: bool
+    protocol: Protocol | None = None
+    broker: str | None = None
+    port: int | None = None
+    topic: str | None = None
+    webhook_url: str | None = Field(None, alias="webhookUrl")
+    resource_uri: str | None = Field(None, alias="resourceUri")
+    bound_at: datetime | None = Field(None, alias="boundAt")
+
+    model_config = {"populate_by_name": True}
+
+
+class BindRequest(BaseModel):
+    """Request to bind a proxy device to an external source."""
+
+    config: BindingConfig
+
+
+class BindResponse(BaseModel):
+    """Response for bind/unbind operations."""
+
+    device_id: str = Field(serialization_alias="deviceId")
+    status: str
+    binding: BindingStatus | None = None
+    webhook_url: str | None = Field(None, serialization_alias="webhookUrl")

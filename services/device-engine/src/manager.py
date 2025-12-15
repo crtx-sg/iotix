@@ -10,13 +10,16 @@ from uuid import uuid4
 
 from .config import settings
 from .device import VirtualDevice
+from .proxy_device import ProxyDevice
 from .metrics import get_metrics_writer
 import random
 
 from .models import (
+    BindingConfig,
     ConnectionConfig,
     DeviceModelConfig,
     DeviceStatus,
+    DeviceType,
     DropoutConfig,
     DropoutStrategy,
     LaunchConfig,
@@ -31,7 +34,8 @@ class DeviceManager:
 
     def __init__(self):
         self._models: dict[str, DeviceModelConfig] = {}
-        self._devices: dict[str, VirtualDevice] = {}
+        self._devices: dict[str, VirtualDevice | ProxyDevice] = {}
+        self._proxy_devices: dict[str, ProxyDevice] = {}  # Subset of _devices for proxy devices
         self._groups: dict[str, set[str]] = {}  # group_id -> device_ids
         self._lock = asyncio.Lock()
         self._stats_task: asyncio.Task | None = None
@@ -49,8 +53,15 @@ class DeviceManager:
         while self._running:
             try:
                 stats = self.get_stats()
-                total_messages = sum(d.messages_sent for d in self._devices.values())
-                total_bytes = sum(d.bytes_sent for d in self._devices.values())
+                # Count messages from virtual devices (sent) and proxy devices (received)
+                total_messages = sum(
+                    getattr(d, 'messages_sent', 0) + getattr(d, 'messages_received', 0)
+                    for d in self._devices.values()
+                )
+                total_bytes = sum(
+                    getattr(d, 'bytes_sent', 0) + getattr(d, 'bytes_received', 0)
+                    for d in self._devices.values()
+                )
 
                 metrics_writer = get_metrics_writer()
                 metrics_writer.write_engine_stats(
@@ -58,6 +69,8 @@ class DeviceManager:
                     total_messages=total_messages,
                     total_bytes=total_bytes,
                     active_groups=len([g for g in self._groups.values() if g]),
+                    active_simulated=stats.get("running_simulated", 0),
+                    active_physical=stats.get("running_physical", 0),
                 )
             except Exception as e:
                 logger.warning(f"Failed to write engine stats: {e}")
@@ -121,7 +134,7 @@ class DeviceManager:
         device_id: str | None = None,
         group_id: str | None = None,
         connection_override: ConnectionConfig | None = None,
-    ) -> VirtualDevice:
+    ) -> VirtualDevice | ProxyDevice:
         """Create a new device instance."""
         model = self._models.get(model_id)
         if not model:
@@ -133,17 +146,26 @@ class DeviceManager:
             )
 
         device_id = device_id or f"{model_id}-{uuid4().hex[:8]}"
+        is_proxy = model.type == DeviceType.PROXY
 
         async with self._lock:
             if device_id in self._devices:
                 raise ValueError(f"Device already exists: {device_id}")
 
-            device = VirtualDevice(
-                device_id=device_id,
-                model=model,
-                connection_override=connection_override,
-                group_id=group_id,
-            )
+            if is_proxy:
+                device: VirtualDevice | ProxyDevice = ProxyDevice(
+                    device_id=device_id,
+                    model=model,
+                    group_id=group_id,
+                )
+                self._proxy_devices[device_id] = device
+            else:
+                device = VirtualDevice(
+                    device_id=device_id,
+                    model=model,
+                    connection_override=connection_override,
+                    group_id=group_id,
+                )
             self._devices[device_id] = device
 
             if group_id:
@@ -158,9 +180,10 @@ class DeviceManager:
             event_type="created",
             model_id=model_id,
             group_id=group_id,
+            source="physical" if is_proxy else "simulated",
         )
 
-        logger.info(f"Created device: {device_id}")
+        logger.info(f"Created {'proxy' if is_proxy else ''} device: {device_id}")
         return device
 
     async def create_device_group(
@@ -190,7 +213,7 @@ class DeviceManager:
         logger.info(f"Created device group {group_id} with {count} devices")
         return group_id, devices
 
-    def get_device(self, device_id: str) -> VirtualDevice | None:
+    def get_device(self, device_id: str) -> VirtualDevice | ProxyDevice | None:
         """Get a device by ID."""
         return self._devices.get(device_id)
 
@@ -201,7 +224,7 @@ class DeviceManager:
         model_id: str | None = None,
         page: int = 1,
         page_size: int = 100,
-    ) -> tuple[list[VirtualDevice], int]:
+    ) -> tuple[list[VirtualDevice | ProxyDevice], int]:
         """List devices with optional filtering and pagination."""
         devices = list(self._devices.values())
 
@@ -245,9 +268,16 @@ class DeviceManager:
 
             model_id = device.model.id
             group_id = device.group_id
+            is_proxy = device_id in self._proxy_devices
 
             if device.status == DeviceStatus.RUNNING:
                 await device.stop()
+
+            # For proxy devices, unbind first
+            if is_proxy:
+                proxy_device = self._proxy_devices[device_id]
+                await proxy_device.unbind()
+                del self._proxy_devices[device_id]
 
             del self._devices[device_id]
 
@@ -264,9 +294,46 @@ class DeviceManager:
             event_type="deleted",
             model_id=model_id,
             group_id=group_id,
+            source="physical" if is_proxy else "simulated",
         )
 
         logger.info(f"Deleted device: {device_id}")
+
+    async def bind_device(self, device_id: str, config: BindingConfig) -> str | None:
+        """Bind a proxy device to an external source.
+
+        Args:
+            device_id: Device identifier
+            config: Binding configuration
+
+        Returns:
+            Webhook URL if HTTP protocol, None otherwise
+        """
+        device = self._devices.get(device_id)
+        if not device:
+            raise ValueError(f"Device not found: {device_id}")
+
+        if device_id not in self._proxy_devices:
+            raise ValueError(f"Device {device_id} is not a proxy device")
+
+        proxy_device = self._proxy_devices[device_id]
+        return await proxy_device.bind(config)
+
+    async def unbind_device(self, device_id: str) -> None:
+        """Unbind a proxy device from its external source.
+
+        Args:
+            device_id: Device identifier
+        """
+        device = self._devices.get(device_id)
+        if not device:
+            raise ValueError(f"Device not found: {device_id}")
+
+        if device_id not in self._proxy_devices:
+            raise ValueError(f"Device {device_id} is not a proxy device")
+
+        proxy_device = self._proxy_devices[device_id]
+        await proxy_device.unbind()
 
     async def start_group(
         self,
@@ -410,11 +477,22 @@ class DeviceManager:
     def get_stats(self) -> dict[str, Any]:
         """Get device manager statistics."""
         running = sum(1 for d in self._devices.values() if d.status == DeviceStatus.RUNNING)
+        running_simulated = sum(
+            1 for d in self._devices.values()
+            if d.status == DeviceStatus.RUNNING and d.device_id not in self._proxy_devices
+        )
+        running_physical = sum(
+            1 for d in self._devices.values()
+            if d.status == DeviceStatus.RUNNING and d.device_id in self._proxy_devices
+        )
         return {
             "total_devices": len(self._devices),
             "running_devices": running,
+            "running_simulated": running_simulated,
+            "running_physical": running_physical,
             "total_groups": len(self._groups),
             "total_models": len(self._models),
+            "total_proxy_devices": len(self._proxy_devices),
         }
 
     async def simulate_dropouts(
@@ -437,9 +515,12 @@ class DeviceManager:
             raise ValueError(f"Group not found: {group_id}")
 
         device_ids = list(self._groups[group_id])
+        # Only include simulated devices (skip proxy devices)
         running_devices = [
             did for did in device_ids
-            if self._devices.get(did) and self._devices[did].status == DeviceStatus.RUNNING
+            if self._devices.get(did)
+            and self._devices[did].status == DeviceStatus.RUNNING
+            and did not in self._proxy_devices
         ]
 
         if not running_devices:

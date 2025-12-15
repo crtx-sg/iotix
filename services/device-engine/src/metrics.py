@@ -53,6 +53,7 @@ class MetricsWriter:
         model_id: str,
         data: dict[str, Any],
         group_id: str | None = None,
+        source: str = "simulated",
     ) -> None:
         """Write telemetry data point to InfluxDB.
 
@@ -61,6 +62,7 @@ class MetricsWriter:
             model_id: Device model identifier
             data: Telemetry data as key-value pairs
             group_id: Optional device group identifier
+            source: Device source type (simulated or physical)
         """
         if not self._enabled or not self._write_api:
             return
@@ -70,6 +72,7 @@ class MetricsWriter:
                 Point("telemetry")
                 .tag("device_id", device_id)
                 .tag("model_id", model_id)
+                .tag("source", source)
                 .time(datetime.now(timezone.utc))
             )
 
@@ -100,15 +103,17 @@ class MetricsWriter:
         model_id: str,
         group_id: str | None = None,
         metadata: dict[str, Any] | None = None,
+        source: str = "simulated",
     ) -> None:
         """Write device lifecycle event to InfluxDB.
 
         Args:
             device_id: Device identifier
-            event_type: Event type (created, started, stopped, deleted)
+            event_type: Event type (created, started, stopped, deleted, bound, unbound)
             model_id: Device model identifier
             group_id: Optional device group identifier
             metadata: Optional event metadata
+            source: Device source type (simulated or physical)
         """
         if not self._enabled or not self._write_api:
             return
@@ -119,6 +124,7 @@ class MetricsWriter:
                 .tag("device_id", device_id)
                 .tag("model_id", model_id)
                 .tag("event_type", event_type)
+                .tag("source", source)
                 .field("value", 1)
                 .time(datetime.now(timezone.utc))
             )
@@ -146,6 +152,8 @@ class MetricsWriter:
         total_messages: int,
         total_bytes: int,
         active_groups: int,
+        active_simulated: int = 0,
+        active_physical: int = 0,
     ) -> None:
         """Write engine statistics to InfluxDB.
 
@@ -154,6 +162,8 @@ class MetricsWriter:
             total_messages: Total messages sent
             total_bytes: Total bytes sent
             active_groups: Number of active device groups
+            active_simulated: Number of active simulated devices
+            active_physical: Number of active physical (proxy) devices
         """
         if not self._enabled or not self._write_api:
             return
@@ -165,6 +175,8 @@ class MetricsWriter:
                 .field("total_messages", total_messages)
                 .field("total_bytes", total_bytes)
                 .field("active_groups", active_groups)
+                .field("active_simulated", active_simulated)
+                .field("active_physical", active_physical)
                 .time(datetime.now(timezone.utc))
             )
 
@@ -181,6 +193,7 @@ class MetricsWriter:
         protocol: str,
         connected: bool,
         latency_ms: float | None = None,
+        source: str = "simulated",
     ) -> None:
         """Write connection metric to InfluxDB.
 
@@ -189,6 +202,7 @@ class MetricsWriter:
             protocol: Protocol name (mqtt, coap, http)
             connected: Whether device is connected
             latency_ms: Optional connection latency in milliseconds
+            source: Device source type (simulated or physical)
         """
         if not self._enabled or not self._write_api:
             return
@@ -198,6 +212,7 @@ class MetricsWriter:
                 Point("connections")
                 .tag("device_id", device_id)
                 .tag("protocol", protocol)
+                .tag("source", source)
                 .field("connected", connected)
                 .time(datetime.now(timezone.utc))
             )
